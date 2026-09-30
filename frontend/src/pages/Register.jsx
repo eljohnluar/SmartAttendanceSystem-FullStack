@@ -44,7 +44,7 @@ export default function Register() {
       <Notice title="Registration is closed">
         <p>
           Self-service sign-up is switched off, so it no longer creates accounts. Ask an admin to
-          add you from the <a href="#/teachers">Teacher Management</a> page.
+          add you from the <a href="#/teachers">Professor Management</a> page.
         </p>
         <p>
           <a href="#/home">Sign in instead</a>

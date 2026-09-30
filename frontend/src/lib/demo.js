@@ -3,12 +3,14 @@
  * VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are filled in.
  */
 
+import { todayStamp } from './attendance.js'
+
 const KEY = 'smartattendance.demo.v1'
 
 const SEED_STUDENTS = [
-  { fingerprint_id: 1, first_name: 'Amara', last_name: 'Okafor', grade_level: 'Grade 5', parent_email: 'parent.amara@example.com' },
-  { fingerprint_id: 2, first_name: 'Daniel', last_name: 'Reyes', grade_level: 'Grade 6', parent_email: 'parent.daniel@example.com' },
-  { fingerprint_id: 3, first_name: 'Mei', last_name: 'Tan', grade_level: 'Grade 5', parent_email: 'parent.mei@example.com' },
+  { fingerprint_id: 1, first_name: 'Amara', last_name: 'Okafor', grade_level: '1st Year', parent_email: 'parent.amara@example.com' },
+  { fingerprint_id: 2, first_name: 'Daniel', last_name: 'Reyes', grade_level: '2nd Year', parent_email: 'parent.daniel@example.com' },
+  { fingerprint_id: 3, first_name: 'Mei', last_name: 'Tan', grade_level: '1st Year', parent_email: 'parent.mei@example.com' },
 ]
 
 function createStore() {
@@ -33,14 +35,30 @@ function createStore() {
       const parsed = JSON.parse(localStorage.getItem(KEY) || 'null')
       if (parsed?.students) {
         parsed.staff = parsed.staff ?? []
+        parsed.staff = parsed.staff.map((row) =>
+          row.grade_level === undefined
+            ? { ...row, grade_level: row.grade_levels?.[0] ?? null }
+            : row,
+        )
         parsed.nextStaffId = parsed.nextStaffId ?? 1
         parsed.grade_settings = parsed.grade_settings ?? []
+        parsed.marks = parsed.marks ?? []
+        parsed.timeLogs = parsed.timeLogs ?? []
         return parsed
       }
     } catch {
       /* corrupt entry below is replaced by a fresh seed */
     }
-    const created = { students: [], logs: [], nextLogId: 1, staff: [], nextStaffId: 1, grade_settings: [] }
+    const created = {
+      students: [],
+      logs: [],
+      nextLogId: 1,
+      staff: [],
+      nextStaffId: 1,
+      grade_settings: [],
+      marks: [],
+      timeLogs: [],
+    }
     localStorage.setItem(KEY, JSON.stringify(created))
     return created
   }
@@ -75,6 +93,17 @@ function createStore() {
         grade_level: null,
         status: 'active',
         temp_password: null,
+        max_session_hours: 8,
+      },
+      {
+        id: 'staff-teacher',
+        email: 'teacher@school.example',
+        full_name: 'Demo Teacher',
+        role: 'teacher',
+        grade_level: '1st Year',
+        status: 'active',
+        temp_password: null,
+        max_session_hours: 8,
       },
     ]
     save()
@@ -127,6 +156,23 @@ function createStore() {
         .map(withStudent)
         .sort((a, b) => b.scan_time.localeCompare(a.scan_time))
     },
+    async kioskPulse(sinceIso) {
+      const today = state.logs.filter((log) => log.scan_time >= sinceIso)
+      const newest = [...today].sort((a, b) => b.scan_time.localeCompare(a.scan_time))[0] ?? null
+      const student = newest
+        ? state.students.find((row) => row.id === newest.student_id) ?? null
+        : null
+      return {
+        log_id: newest?.id ?? null,
+        first_name: student?.first_name ?? null,
+        last_name: student?.last_name ?? null,
+        grade_level: student?.grade_level ?? null,
+        status: newest?.status ?? null,
+        scan_time: newest?.scan_time ?? null,
+        parent_notified: newest?.parent_notified ?? false,
+        checked_in: new Set(today.map((log) => log.student_id)).size,
+      }
+    },
     async getStatus() {
       return {
         id: 1,
@@ -148,6 +194,32 @@ function createStore() {
         : [...state.grade_settings, row]
       save()
       return row
+    },
+    async listMarks() {
+      const today = todayStamp()
+      return state.marks.filter((mark) => mark.mark_date === today)
+    },
+    async saveMark(studentId, status) {
+      const today = todayStamp()
+      const existing = state.marks.find((m) => m.student_id === studentId && m.mark_date === today)
+      if (existing) {
+        existing.status = status
+        existing.updated_at = new Date().toISOString()
+      } else {
+        state.marks.push({
+          id: `mark-${crypto.randomUUID()}`,
+          student_id: studentId,
+          mark_date: today,
+          status,
+          updated_at: new Date().toISOString(),
+        })
+      }
+      save()
+    },
+    async clearMark(studentId) {
+      const today = todayStamp()
+      state.marks = state.marks.filter((m) => !(m.student_id === studentId && m.mark_date === today))
+      save()
     },
     async resetAttendance(grade, sinceIso) {
       const inGrade = new Set(
@@ -191,7 +263,12 @@ function createStore() {
       return [...state.staff]
     },
     async myStaffProfile() {
-      return state.staff.find((row) => row.role === 'admin') ?? state.staff[0] ?? null
+      return (
+        state.staff.find((row) => row.role === demoRole()) ??
+        state.staff.find((row) => row.role === 'admin') ??
+        state.staff[0] ??
+        null
+      )
     },
     async addStaff(input) {
       if (state.staff.some((row) => row.email.toLowerCase() === input.email.toLowerCase())) {
@@ -219,6 +296,63 @@ function createStore() {
       state.staff = state.staff.filter((row) => row.id !== id)
       save()
     },
+    async timeIn() {
+      const me = state.staff.find((row) => row.role === demoRole())
+        ?? state.staff.find((row) => row.role === 'admin')
+        ?? state.staff[0]
+      if (!me) throw new Error('No staff profile found in demo mode.')
+      const today = todayStamp()
+      const existing = state.timeLogs?.find(
+        (log) => log.staff_id === me.id && log.work_date === today,
+      )
+      if (existing) return existing
+      const row = {
+        id: `time-${crypto.randomUUID()}`,
+        staff_id: me.id,
+        work_date: today,
+        time_in: new Date().toISOString(),
+        time_out: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      state.timeLogs = state.timeLogs ?? []
+      state.timeLogs.push(row)
+      save()
+      return row
+    },
+    async timeOut() {
+      const me = state.staff.find((row) => row.role === demoRole())
+        ?? state.staff.find((row) => row.role === 'admin')
+        ?? state.staff[0]
+      if (!me) throw new Error('No staff profile found in demo mode.')
+      const today = todayStamp()
+      const row = state.timeLogs?.find(
+        (log) => log.staff_id === me.id && log.work_date === today && !log.time_out,
+      )
+      if (!row) return null
+      row.time_out = new Date().toISOString()
+      row.updated_at = new Date().toISOString()
+      save()
+      return row
+    },
+    async getMyTimeStatus() {
+      const me = state.staff.find((row) => row.role === demoRole())
+        ?? state.staff.find((row) => row.role === 'admin')
+        ?? state.staff[0]
+      if (!me) return null
+      const today = todayStamp()
+      return (
+        state.timeLogs?.find((log) => log.staff_id === me.id && log.work_date === today) ?? null
+      )
+    },
+    async setMaxSessionHours(staffId, hours) {
+      const row = state.staff.find((s) => s.id === staffId)
+      if (!row) throw new Error('Staff member not found.')
+      row.max_session_hours = hours
+      row.updated_at = new Date().toISOString()
+      save()
+      return row
+    },
     /** Stands in for the sensor: honours a requested slot, else the next free one. */
     startCapture(requestedSlot) {
       let slot = Number(requestedSlot) || 0
@@ -227,16 +361,43 @@ function createStore() {
         slot = 1
         while (taken.has(slot)) slot += 1
       }
-      const capture = { id: crypto.randomUUID(), status: 'capturing', fingerprint_id: null }
+      const capture = { id: crypto.randomUUID(), status: 'capturing', fingerprint_id: null, step: 'place_1' }
       captures.set(capture.id, capture)
+      setTimeout(() => {
+        capture.step = 'seen_1'
+      }, 1200)
+      setTimeout(() => {
+        capture.step = 'lift'
+      }, 2200)
+      setTimeout(() => {
+        capture.step = 'place_2'
+      }, 3400)
+      setTimeout(() => {
+        capture.step = 'seen_2'
+      }, 4400)
       setTimeout(() => {
         capture.status = 'done'
         capture.fingerprint_id = slot
-      }, 1800)
+        capture.step = null
+      }, 5200)
       return capture
     },
     getCapture(id) {
       return captures.get(id) ?? null
+    },
+    queueClear(slot) {
+      const capture = {
+        id: crypto.randomUUID(),
+        status: 'capturing',
+        fingerprint_id: null,
+        action: 'delete',
+        target_slot: Number(slot),
+      }
+      captures.set(capture.id, capture)
+      setTimeout(() => {
+        capture.status = 'done'
+      }, 1200)
+      return capture
     },
     subscribe(fn) {
       listeners.add(fn)

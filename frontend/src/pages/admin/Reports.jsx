@@ -168,7 +168,7 @@ export default function Reports() {
         </article>
 
         <article className="card">
-          <h2>Teachers by class size</h2>
+          <h2>Professors by class size</h2>
           <BarList items={teachersByClass} />
         </article>
 

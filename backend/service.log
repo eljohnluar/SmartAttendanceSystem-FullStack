@@ -1,0 +1,12 @@
+Smart Attendance backend
+build 2026-09-29a
+database: Supabase (https://evwhonzckriikpfivblr.supabase.co)
+email   : console (nothing configured)
+hardware: COM3
+[sensor] BOOT
+[sensor] SCAN_READY
+[scan] ID 3 is not enrolled — add it on the Enrollment page.
+[serial] Link dropped (ClearCommError failed (PermissionError(13, 'The device does not recognize the command.', None, 22))); will retry.
+[serial] COM3 not available - waiting for the Arduino to come back.
+[serial] Reconnected to COM3.
+[sensor] SCAN_READY

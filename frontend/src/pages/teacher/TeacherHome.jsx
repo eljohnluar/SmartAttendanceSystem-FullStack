@@ -4,9 +4,9 @@ import { formatDateLong, formatTime, fullName } from '../../lib/format.js'
 import { useApp } from '../../lib/useApp.js'
 
 export default function TeacherHome() {
-  const { students, logs, staff } = useApp()
-  const stats = summarize(students, logs)
-  const roster = rosterWithStatus(students, logs)
+  const { students, logs, marks, staff } = useApp()
+  const stats = summarize(students, logs, marks)
+  const roster = rosterWithStatus(students, logs, marks)
 
   return (
     <section className="page">
@@ -33,7 +33,7 @@ export default function TeacherHome() {
         </div>
         <div className="stat">
           <span className="stat-value">{stats.absent}</span>
-          <span className="stat-label">Not scanned yet</span>
+          <span className="stat-label">Absent</span>
         </div>
       </div>
 
@@ -54,25 +54,26 @@ export default function TeacherHome() {
               </tr>
             </thead>
             <tbody>
-              {roster.map(({ student, log }) => (
-                <tr key={student.id}>
-                  <td>
-                    <span className="cell-person">
-                      <Avatar student={student} size="sm" />
-                      <strong>{fullName(student)}</strong>
-                    </span>
-                  </td>
-                  <td className="mono">{log ? formatTime(log.scan_time) : '—'}</td>
-                  <td>
-                    {log ? (
-                      <span className={`dot dot-${log.status === 'Late' ? 'late' : 'present'}`} />
-                    ) : (
-                      <span className="dot dot-absent" />
-                    )}
-                    {log?.status ?? 'Absent'}
-                  </td>
-                </tr>
-              ))}
+              {roster.map(({ student, log, mark }) => {
+                const status = mark?.status ?? log?.status ?? 'Absent'
+                const tone = status === 'Late' ? 'late' : status === 'Absent' ? 'absent' : 'present'
+                return (
+                  <tr key={student.id}>
+                    <td>
+                      <span className="cell-person">
+                        <Avatar student={student} size="sm" />
+                        <strong>{fullName(student)}</strong>
+                      </span>
+                    </td>
+                    <td className="mono">{log ? formatTime(log.scan_time) : '—'}</td>
+                    <td>
+                      <span className={`dot dot-${tone}`} />
+                      {status}
+                      {mark ? ' · marked' : ''}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

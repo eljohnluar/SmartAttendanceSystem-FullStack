@@ -5,13 +5,20 @@ import { StudentForm } from '../../components/StudentForm.jsx'
 import { fullName } from '../../lib/format.js'
 import { useApp } from '../../lib/useApp.js'
 
-const GRADES = ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+const GRADES = ['1st Year', '2nd Year', '3rd Year', '4th Year']
 
 function StaffRow({ row, onChanged, isAdmin }) {
   const [copied, setCopied] = useState(false)
 
   async function changeGrade(event) {
     await api.updateStaff(row.id, { grade_level: event.target.value || null })
+    await onChanged()
+  }
+
+  async function changeHours(event) {
+    const hours = Number(event.target.value)
+    if (!hours || hours <= 0) return
+    await api.setMaxSessionHours(row.id, hours)
     await onChanged()
   }
 
@@ -62,6 +69,18 @@ function StaffRow({ row, onChanged, isAdmin }) {
         )}
       </td>
       <td>
+        <input
+          type="number"
+          min="0.5"
+          max="24"
+          step="0.5"
+          value={row.max_session_hours ?? 8}
+          onChange={changeHours}
+          aria-label={`Allotted hours for ${row.full_name}`}
+          style={{ width: '70px' }}
+        />
+      </td>
+      <td>
         <span className={`dot dot-${row.status === 'active' ? 'present' : 'late'}`} />
         {row.status}
         {row.status === 'failed' && row.error ? <em>{row.error}</em> : null}
@@ -93,22 +112,34 @@ function StaffRow({ row, onChanged, isAdmin }) {
   )
 }
 
-function StudentRow({ student, onChanged }) {
+function StudentRow({ student, onChanged, onCapture }) {
   const [draft, setDraft] = useState(null)
   const [error, setError] = useState('')
+  const [note, setNote] = useState('')
 
   const set = (field) => (event) => setDraft((previous) => ({ ...previous, [field]: event.target.value }))
 
   async function save() {
     setError('')
+    const nextId = Number(draft.fingerprint_id)
     try {
       await api.updateStudent(student.id, {
         first_name: draft.first_name.trim(),
         last_name: draft.last_name.trim(),
         grade_level: draft.grade_level.trim(),
         parent_email: draft.parent_email.trim().toLowerCase(),
-        fingerprint_id: Number(draft.fingerprint_id),
+        fingerprint_id: nextId,
       })
+      if (nextId !== student.fingerprint_id) {
+        // The old template keeps matching this finger on the sensor and would
+        // be handed to whoever is enrolled into that slot next, so clear it.
+        try {
+          await api.queueClear(student.fingerprint_id)
+          setNote(`Old slot ${student.fingerprint_id} queued for clearing on the scanner.`)
+        } catch (clearError) {
+          setNote(`Saved, but the old slot could not be queued for clearing: ${clearError.message}`)
+        }
+      }
       setDraft(null)
       await onChanged()
     } catch (saveError) {
@@ -175,6 +206,10 @@ function StudentRow({ student, onChanged }) {
       <td>{student.grade_level}</td>
       <td className="muted">{student.parent_email}</td>
       <td className="row-actions">
+        {note && <em className="hint">{note}</em>}
+        <button type="button" className="btn btn-quiet" onClick={() => onCapture(student)}>
+          Fingerprint
+        </button>
         <button
           type="button"
           className="btn btn-quiet"
@@ -216,9 +251,9 @@ export default function TeacherManagement() {
   return (
     <section className="page">
       <header className="page-head">
-        <h1>Teacher management</h1>
+        <h1>Professor management</h1>
         <p className="page-sub">
-          Assign each teacher to one grade — that grade is all their login can reach — and manage the
+          Assign each professor to one grade — that grade is all their login can reach — and manage the
           student roster underneath them.
         </p>
       </header>
@@ -234,6 +269,7 @@ export default function TeacherManagement() {
                 <th>Name</th>
                 <th>Role</th>
                 <th>Grade</th>
+                <th>Allotted hours</th>
                 <th>Status</th>
                 <th />
               </tr>
@@ -291,7 +327,7 @@ export default function TeacherManagement() {
               </thead>
               <tbody>
                 {visibleStudents.map((student) => (
-                  <StudentRow key={student.id} student={student} onChanged={refresh} />
+                  <StudentRow key={student.id} student={student} onChanged={refresh} onCapture={setCapturing} />
                 ))}
               </tbody>
             </table>

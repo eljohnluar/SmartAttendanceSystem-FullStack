@@ -1,14 +1,68 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
+import { latestByStudent, markFor, summarize } from '../lib/attendance.js'
 import { Avatar, StatusPill } from '../components/ui.jsx'
 import { formatDateLong, formatTime, fullName, studentFor } from '../lib/format.js'
 import { useApp } from '../lib/useApp.js'
+
+function TimeCard() {
+  const { staff, setMaxSessionHours } = useApp()
+  const [hoursInput, setHoursInput] = useState(staff?.max_session_hours ?? 8)
+  const [hoursSaved, setHoursSaved] = useState(false)
+  const [hoursError, setHoursError] = useState('')
+
+  async function saveHours() {
+    const hours = Number(hoursInput)
+    if (!hours || hours <= 0 || hours > 24) {
+      setHoursError('Enter a value between 0.5 and 24.')
+      return
+    }
+    try {
+      await setMaxSessionHours(staff.id, hours)
+      setHoursSaved(true)
+      setHoursError('')
+      setTimeout(() => setHoursSaved(false), 2000)
+    } catch (error) {
+      setHoursError(error.message)
+    }
+  }
+
+  return (
+    <article className="card time-card">
+      <h2>Allotted session time</h2>
+      <p className="muted" style={{ marginBottom: '16px' }}>
+        Set the maximum number of hours you can stay logged in. When the time is up, you will be
+        logged out automatically.
+      </p>
+      <div className="hours-row">
+        <div className="field" style={{ flex: '0 1 140px' }}>
+          <label htmlFor="max_session_hours">Hours</label>
+          <input
+            id="max_session_hours"
+            type="number"
+            min="0.5"
+            max="24"
+            step="0.5"
+            value={hoursInput}
+            onChange={(e) => setHoursInput(e.target.value)}
+          />
+        </div>
+        <button type="button" className="btn btn-primary" onClick={saveHours}>
+          {hoursSaved ? 'Saved' : 'Save'}
+        </button>
+      </div>
+      {hoursError && <p className="alert alert-error" style={{ marginTop: '12px' }}>{hoursError}</p>}
+      {hoursSaved && <p className="alert alert-ok" style={{ marginTop: '12px' }}>Allotted time updated.</p>}
+    </article>
+  )
+}
 
 const SUGGESTED_START = '08:00'
 const SUGGESTED_GRACE = 15
 
 function matches(needle, ...haystacks) {
-  return haystacks.some((text) => (text ?? '').toLowerCase().includes(needle))
+  // fingerprint_id arrives as a number, which has no toLowerCase of its own.
+  return haystacks.some((text) => String(text ?? '').toLowerCase().includes(needle))
 }
 
 function cutoffOf(start, minutes) {
@@ -201,12 +255,12 @@ function LateRule({ students, logs }) {
 }
 
 export default function Dashboard() {
-  const { students, logs, backend, access, staff } = useApp()
+  const { students, logs, marks, backend, access, staff, refresh } = useApp()
   const [query, setQuery] = useState('')
   const needle = query.trim().toLowerCase()
 
-  const present = logs.filter((log) => log.status === 'Present')
-  const late = logs.filter((log) => log.status === 'Late')
+  const stats = summarize(students, logs, marks)
+  const latest = latestByStudent(logs)
 
   const visibleLogs = useMemo(
     () =>
@@ -221,10 +275,28 @@ export default function Dashboard() {
   const visibleStudents = useMemo(
     () =>
       students.filter((student) =>
-        matches(needle, fullName(student), student.grade_level, student.parent_email, student.fingerprint_id),
+        matches(
+          needle,
+          fullName(student),
+          student.grade_level,
+          student.parent_email,
+          student.fingerprint_id,
+          markFor(marks, student.id)?.status ?? latest.get(student.id)?.status ?? '',
+        ),
       ),
-    [students, needle],
+    [students, marks, latest, needle],
   )
+
+  /** '' means "no override — go by the scan", which deletes the mark row. */
+  async function setMark(student, status) {
+    try {
+      if (status) await api.saveMark(student.id, status)
+      else await api.clearMark(student.id)
+      await refresh()
+    } catch (markError) {
+      window.alert(markError.message)
+    }
+  }
 
   return (
     <section className="page">
@@ -241,22 +313,28 @@ export default function Dashboard() {
 
       <div className="stats">
         <div className="stat">
-          <span className="stat-value">{students.length}</span>
+          <span className="stat-value">{stats.enrolled}</span>
           <span className="stat-label">Students enrolled</span>
         </div>
         <div className="stat">
-          <span className="stat-value">{present.length}</span>
+          <span className="stat-value">{stats.present}</span>
           <span className="stat-label">Present today</span>
         </div>
         <div className="stat">
-          <span className="stat-value">{late.length}</span>
+          <span className="stat-value">{stats.late}</span>
           <span className="stat-label">Late today</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{stats.absent}</span>
+          <span className="stat-label">Absent today</span>
         </div>
         <div className="stat">
           <span className="stat-value">{logs.filter((log) => log.parent_notified).length}</span>
           <span className="stat-label">Parent emails sent</span>
         </div>
       </div>
+
+      <TimeCard />
 
       <LateRule students={students} logs={logs} />
 
@@ -335,22 +413,41 @@ export default function Dashboard() {
                   <th>Name</th>
                   <th>Grade</th>
                   <th>Parent email</th>
+                  <th>Today</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleStudents.map((student) => (
-                  <tr key={student.id}>
-                    <td className="mono">{student.fingerprint_id}</td>
-                    <td>
-                      <span className="cell-person">
-                        <Avatar student={student} size="sm" />
-                        <strong>{fullName(student)}</strong>
-                      </span>
-                    </td>
-                    <td>{student.grade_level}</td>
-                    <td className="muted">{student.parent_email}</td>
-                  </tr>
-                ))}
+                {visibleStudents.map((student) => {
+                  const scan = latest.get(student.id)
+                  const mark = markFor(marks, student.id)
+                  return (
+                    <tr key={student.id}>
+                      <td className="mono">{student.fingerprint_id}</td>
+                      <td>
+                        <span className="cell-person">
+                          <Avatar student={student} size="sm" />
+                          <strong>{fullName(student)}</strong>
+                        </span>
+                      </td>
+                      <td>{student.grade_level}</td>
+                      <td className="muted">{student.parent_email}</td>
+                      <td>
+                        <select
+                          value={mark?.status ?? ''}
+                          onChange={(event) => setMark(student, event.target.value)}
+                          aria-label={`Today's status for ${fullName(student)}`}
+                        >
+                          <option value="">
+                            {scan ? `By scan — ${scan.status}` : 'No scan yet'}
+                          </option>
+                          <option value="Present">Mark present</option>
+                          <option value="Late">Mark late</option>
+                          <option value="Absent">Mark absent</option>
+                        </select>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}

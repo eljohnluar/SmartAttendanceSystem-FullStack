@@ -235,6 +235,32 @@ code {
   box-shadow: 0 10px 34px rgba(20, 22, 26, 0.07);
 }
 
+.kiosk-bare {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-soft);
+}
+
+.kiosk-bare .kiosk {
+  min-height: 100vh;
+}
+
+.kiosk-signin {
+  position: absolute;
+  bottom: 18px;
+  right: 24px;
+  font-size: 13px;
+  color: var(--ink-faint);
+  text-decoration: none;
+}
+
+.kiosk-signin:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
 .mode-tag {
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -539,6 +565,71 @@ select:disabled {
   font-weight: 600;
 }
 
+/* ── Live capture stages in the enroll modal ────────────── */
+.scan-steps {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.scan-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.scan-step-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.scan-step-active,
+.scan-step-seen {
+  border-color: #cbe6d6;
+  background: var(--present-soft);
+  color: var(--present);
+  font-weight: 600;
+}
+
+.scan-step-active .scan-step-dot,
+.scan-step-seen .scan-step-dot {
+  background: var(--present);
+}
+
+.scan-step-seen .scan-step-dot {
+  animation: scan-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes scan-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--present-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--present-soft);
+  }
+}
+
+.scan-step-done {
+  color: var(--ink-soft);
+}
+
+.scan-step-done .scan-step-dot {
+  background: var(--present);
+}
+
 .password-row {
   display: flex;
   gap: 10px;
@@ -801,6 +892,96 @@ select:disabled {
   color: var(--danger);
 }
 
+/* ── Time tracking ──────────────────────────────────────── */
+.time-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.time-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.time-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.time-dot-in {
+  background: var(--present);
+  box-shadow: 0 0 0 3px var(--present-soft);
+}
+
+.time-dot-out {
+  background: var(--late);
+}
+
+.time-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.time-countdown {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--present);
+  background: var(--present-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.hours-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.time-error {
+  font-size: 12.5px;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.time-card {
+  margin-bottom: 26px;
+}
+
+.time-row {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.time-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.time-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.time-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* ── Dashboard ──────────────────────────────────────────── */
 .btn-danger {
   background: transparent;
@@ -848,7 +1029,7 @@ select:disabled {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 16px;
   margin-bottom: 26px;
 }
@@ -1085,6 +1266,20 @@ td em {
   gap: 14px;
   border-top: 1px solid var(--line);
   padding-top: 18px;
+}
+
+.login-kiosk {
+  display: block;
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-faint);
+  text-decoration: none;
+}
+
+.login-kiosk:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 .login-alt .btn {

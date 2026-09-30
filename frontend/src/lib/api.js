@@ -1,5 +1,6 @@
 import { demo } from './demo.js'
 import { isLive, supabase } from './config.js'
+import { todayStamp } from './attendance.js'
 
 export const mode = isLive ? 'live' : 'demo'
 
@@ -10,7 +11,7 @@ function unwrap(promise) {
   })
 }
 
-function startOfToday() {
+export function startOfToday() {
   const now = new Date()
   now.setHours(0, 0, 0, 0)
   return now.toISOString()
@@ -81,6 +82,13 @@ export const api = {
     )
   },
 
+  /** One row for the signed-out Scan Station: newest scan today + head count. */
+  async kioskPulse() {
+    if (!isLive) return demo.kioskPulse(startOfToday())
+    const [row] = await unwrap(supabase.rpc('kiosk_pulse', { p_since: startOfToday() }))
+    return row ?? null
+  },
+
   /** When a class starts and how much slack it gets, or null for the .env default. */
   async getGradeSettings(grade) {
     if (!isLive) return demo.getGradeSettings(grade)
@@ -116,6 +124,36 @@ export const api = {
     if (!isLive) return demo.getStatus()
     const { data } = await supabase.from('backend_status').select('*').eq('id', 1).maybeSingle()
     return data
+  },
+
+  /** The teacher's manual attendance overrides for today. */
+  async listMarks() {
+    if (!isLive) return demo.listMarks()
+    return unwrap(supabase.from('attendance_marks').select('*').eq('mark_date', todayStamp()))
+  },
+
+  async saveMark(studentId, status) {
+    if (!isLive) return demo.saveMark(studentId, status)
+    const { error } = await supabase.from('attendance_marks').upsert(
+      {
+        student_id: studentId,
+        mark_date: todayStamp(),
+        status,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'student_id,mark_date' },
+    )
+    if (error) throw new Error(error.message)
+  },
+
+  async clearMark(studentId) {
+    if (!isLive) return demo.clearMark(studentId)
+    const { error } = await supabase
+      .from('attendance_marks')
+      .delete()
+      .eq('student_id', studentId)
+      .eq('mark_date', todayStamp())
+    if (error) throw new Error(error.message)
   },
 
   async listStaff() {
@@ -174,6 +212,41 @@ export const api = {
     return Boolean(data)
   },
 
+  /** Clock the signed-in staff member in for today. */
+  async timeIn() {
+    if (!isLive) return demo.timeIn()
+    const { data, error } = await supabase.rpc('time_in')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Clock the signed-in staff member out for today. */
+  async timeOut() {
+    if (!isLive) return demo.timeOut()
+    const { data, error } = await supabase.rpc('time_out')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** The signed-in staff member's time row for today, or null before they clock in. */
+  async getMyTimeStatus() {
+    if (!isLive) return demo.getMyTimeStatus()
+    const { data, error } = await supabase.rpc('my_time_status')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Set the maximum session hours for a staff member. */
+  async setMaxSessionHours(staffId, hours) {
+    if (!isLive) return demo.setMaxSessionHours(staffId, hours)
+    const { data, error } = await supabase.rpc('set_max_session_hours', {
+      p_staff_id: staffId,
+      p_hours: hours,
+    })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
   /** Claims an admin row for the account that just registered. */
   async claimAdminProfile(fullName) {
     if (!isLive) return demo.addStaff({ full_name: fullName, email: 'admin@school.example', role: 'admin', grade_level: null })
@@ -216,10 +289,42 @@ export const api = {
     return data
   },
 
+  /** Queues removal of a stale template (after a transfer); the Python service clears it on the sensor. */
+  async queueClear(fingerprintId) {
+    if (!isLive) return demo.queueClear(fingerprintId)
+    const { data, error } = await supabase
+      .from('fingerprint_captures')
+      .insert({ status: 'pending', target_slot: fingerprintId, action: 'delete' })
+      .select()
+      .single()
+    if (error) {
+      throw new Error(
+        error.message.includes('fingerprint_captures')
+          ? 'The capture table is missing — re-run backend/schema.sql.'
+          : error.message,
+      )
+    }
+    return data
+  },
+
   async getCapture(id) {
     if (!isLive) return demo.getCapture(id)
     const { data } = await supabase.from('fingerprint_captures').select('*').eq('id', id).maybeSingle()
     return data
+  },
+
+  /** Stage updates push over realtime so the enroll modal reacts at once; polling stays as the backstop. */
+  subscribeCaptures(onChange) {
+    if (!isLive) return () => {}
+    const channel = supabase
+      .channel('capture-feed')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'fingerprint_captures' },
+        onChange,
+      )
+      .subscribe()
+    return () => supabase.removeChannel(channel)
   },
 
   /** Fires whenever attendance, roster or staff data may have changed. */
@@ -236,6 +341,7 @@ export const api = {
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_profiles' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_marks' }, onChange)
       .subscribe()
     return () => supabase.removeChannel(channel)
   },

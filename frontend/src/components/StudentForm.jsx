@@ -107,14 +107,14 @@ export function StudentForm({ fixedGrade, students, nextId, onSaved, bare = fals
         ) : (
           <input
             id="grade_level"
-            placeholder="Grade 5"
+            placeholder="1st Year"
             value={form.grade_level}
             onChange={update('grade_level')}
             list="grade-options"
           />
         )}
         <datalist id="grade-options">
-          {[...new Set([...students.map((student) => student.grade_level), 'Grade 5'])]
+          {[...new Set([...students.map((student) => student.grade_level), '1st Year'])]
             .filter(Boolean)
             .sort()
             .map((grade) => (

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../../lib/api.js'
 import { useApp } from '../../lib/useApp.js'
 
-const GRADES = ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
+const GRADES = ['1st Year', '2nd Year', '3rd Year', '4th Year']
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // Same alphabet the Python service uses: no 0/O or 1/l/I, so a password
 // survives being read to someone over the phone.
@@ -13,7 +13,7 @@ function generatePassword() {
   return [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('')
 }
 
-const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grade_level: '', temp_password: generatePassword() })
+const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grade_level: '', temp_password: generatePassword(), max_session_hours: 8 })
 
 export default function AddStaff() {
   const { refreshStaff, mode } = useApp()
@@ -34,7 +34,7 @@ export default function AddStaff() {
 
     if (!form.full_name.trim()) return setError('Enter the staff member’s name.')
     if (!EMAIL_PATTERN.test(email)) return setError('Enter a valid email address.')
-    if (form.role === 'teacher' && !form.grade_level) return setError('Teachers are scoped to one grade.')
+    if (form.role === 'teacher' && !form.grade_level) return setError('Professors are scoped to one grade.')
     const password = form.temp_password.trim()
     if (password && password.length < 8) {
       return setError('Use at least 8 characters, or leave it blank to auto-generate.')
@@ -48,6 +48,7 @@ export default function AddStaff() {
         role: form.role,
         grade_level: form.role === 'teacher' ? form.grade_level : null,
         temp_password: password || null,
+        max_session_hours: form.max_session_hours,
       })
       setSaved(row)
       setForm(EMPTY())
@@ -85,7 +86,7 @@ export default function AddStaff() {
           <div className="field">
             <label htmlFor="role">Role</label>
             <select id="role" value={form.role} onChange={update('role')}>
-              <option value="teacher">Teacher — one grade, read and enroll</option>
+              <option value="teacher">Professor — one grade, read and enroll</option>
               <option value="admin">Admin — whole school, can manage staff</option>
             </select>
           </div>
@@ -105,6 +106,20 @@ export default function AddStaff() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="max_session_hours">Allotted hours</label>
+            <input
+              id="max_session_hours"
+              type="number"
+              min="0.5"
+              max="24"
+              step="0.5"
+              value={form.max_session_hours}
+              onChange={update('max_session_hours')}
+            />
+            <span className="hint">Maximum hours this person can stay clocked in before auto-logout.</span>
           </div>
 
           <div className="field field-wide">
@@ -149,7 +164,7 @@ export default function AddStaff() {
         <aside className="card">
           <h2>What happens next</h2>
           <ol className="steps">
-            <li>The account appears on the Teacher Management page as <strong>pending</strong>.</li>
+            <li>The account appears on the Professor Management page as <strong>pending</strong>.</li>
             <li>
               The Python service picks it up within a few seconds and creates the Supabase login.
             </li>

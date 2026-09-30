@@ -47,6 +47,7 @@ export default function Students() {
                 <th>Name</th>
                 <th>Grade</th>
                 <th>Parent</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -58,6 +59,15 @@ export default function Students() {
                   </td>
                   <td>{student.grade_level}</td>
                   <td className="muted">{student.parent_email}</td>
+                  <td className="row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      onClick={() => setCapturing(student)}
+                    >
+                      Fingerprint
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -23,11 +23,12 @@ const ROUTES = [
   { path: 'kiosk', label: 'Scan Station', View: Kiosk, roles: ['teacher'] },
   { path: 'home', label: 'Dashboard', View: Home, roles: STAFF },
   { path: 'add-staff', label: 'Add Staff', View: AddStaff, roles: ADMIN },
-  { path: 'teachers', label: 'Teacher Management', View: TeacherManagement, roles: ADMIN },
+  { path: 'teachers', label: 'Professor Management', View: TeacherManagement, roles: ADMIN },
   { path: 'students', label: 'My Students', View: Students, roles: ['teacher'] },
   { path: 'attendance', label: 'Attendance', View: Attendance, roles: STAFF },
   { path: 'reports', label: 'Reports', View: Reports, roles: ADMIN },
   { path: 'register', label: 'Register', View: Register, roles: ['public'], hidden: true },
+  { path: 'login', label: 'Sign in', View: Login, roles: ['public'], hidden: true },
 ]
 
 function hashPath() {
@@ -35,8 +36,8 @@ function hashPath() {
   return ROUTES.some((route) => route.path === hash) ? hash : null
 }
 
-/** Guests and unprovisioned logins get no navigation at all. */
-function Bare({ access, user, staff, path, onSignOut }) {
+/** Unprovisioned logins get no navigation at all. */
+function Bare({ access, user, staff, onSignOut }) {
   if (access === 'pending') {
     return (
       <Notice title="Waiting for approval">
@@ -53,23 +54,19 @@ function Bare({ access, user, staff, path, onSignOut }) {
     )
   }
 
-  if (access === 'failed') {
-    return (
-      <Notice title="Account could not be created">
-        <p>
-          The backend tried to provision {user?.email} and failed: {staff?.error || 'no reason given'}
-          . An admin can retry from the Staff page.
-        </p>
-        <p>
-          <button type="button" className="link-btn" onClick={onSignOut}>
-            Sign out
-          </button>
-        </p>
-      </Notice>
-    )
-  }
-
-  return path === 'register' ? <Register /> : <Login />
+  return (
+    <Notice title="Account could not be created">
+      <p>
+        The backend tried to provision {user?.email} and failed: {staff?.error || 'no reason given'}
+        . An admin can retry from the Staff page.
+      </p>
+      <p>
+        <button type="button" className="link-btn" onClick={onSignOut}>
+          Sign out
+        </button>
+      </p>
+    </Notice>
+  )
 }
 
 function Shell() {
@@ -83,12 +80,35 @@ function Shell() {
   }, [])
 
   const isStaff = STAFF.includes(access)
-  const current = path ?? 'home'
+  // A signed-out classroom PC is the Scan Station: students check in before
+  // any teacher arrives, so guests land on the kiosk instead of the login.
+  const current = path ?? (isStaff ? 'home' : 'kiosk')
 
   if (!isStaff) {
+    if (access === 'pending' || access === 'failed') {
+      return (
+        <div className="bare">
+          <Bare access={access} user={user} staff={staff} onSignOut={signOut} />
+        </div>
+      )
+    }
+    if (current === 'kiosk') {
+      return (
+        <div className="kiosk-bare">
+          <Kiosk />
+          <a className="kiosk-signin" href="#/login">
+            Staff sign in
+          </a>
+        </div>
+      )
+    }
+    // Guests get exactly three screens. Any staff hash left in the address
+    // bar (e.g. #/reports when signing out) falls back to the login form,
+    // never to the staff page itself.
+    const GuestView = current === 'register' ? Register : Login
     return (
       <div className="bare">
-        <Bare access={access} user={user} staff={staff} path={path ?? 'login'} onSignOut={signOut} />
+        <GuestView />
       </div>
     )
   }

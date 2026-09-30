@@ -1,13 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { api } from '../lib/api.js'
 import { Avatar, Badge } from '../components/ui.jsx'
-import { formatTime, fullName, studentFor } from '../lib/format.js'
+import { formatTime, fullName } from '../lib/format.js'
 import { useApp } from '../lib/useApp.js'
 
 const DWELL_MS = 5000
+// The signed-out kiosk has no realtime role, so polling is its only feed;
+// keep it brisk or a scan feels like it never registered.
+const PULSE_MS = 1000
+const FRESH_MS = 15000
 
 export default function Kiosk() {
-  const { scan, students, logs, mode, simulateScan, loadError } = useApp()
+  const { mode, simulateScan } = useApp()
   const [clock, setClock] = useState(() => new Date())
+  const [pulse, setPulse] = useState(null)
+  const [card, setCard] = useState(null)
   const [demoId, setDemoId] = useState('1')
   const [demoError, setDemoError] = useState('')
 
@@ -16,8 +23,46 @@ export default function Kiosk() {
     return () => clearInterval(timer)
   }, [])
 
-  const student = scan ? studentFor(scan, students) : null
-  const showStudent = Boolean(student) && clock.getTime() - scan.arrivedAt < DWELL_MS
+  // Polled rather than subscribed so the signed-out kiosk — which has no
+  // realtime role — still sees every scan the Python service records.
+  useEffect(() => {
+    let live = true
+    const tick = () => {
+      // A missing kiosk_pulse() (schema not re-run yet) must not spam
+      // unhandled rejections every poll; the welcome screen still renders.
+      api.kioskPulse().then((row) => {
+        if (live) setPulse(row)
+      }).catch(() => {})
+    }
+    tick()
+    const timer = setInterval(tick, PULSE_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  // Skip the first pulse (it is history, not news) and ignore scans older than
+  // a few seconds, so opening the kiosk at noon or a teacher's "clear today"
+  // cannot re-show a morning check-in.
+  const primed = useRef(false)
+  useEffect(() => {
+    if (!pulse?.log_id) return
+    if (!primed.current) {
+      primed.current = true
+      return
+    }
+    const age = Date.now() - Date.parse(pulse.scan_time)
+    if (pulse.log_id !== card?.logId && age < FRESH_MS) {
+      setCard({ logId: pulse.log_id, row: pulse, arrivedAt: Date.now() })
+    }
+  }, [pulse, card])
+
+  const row = card?.row ?? null
+  const student = row?.log_id
+    ? { first_name: row.first_name, last_name: row.last_name, grade_level: row.grade_level }
+    : null
+  const showStudent = Boolean(student) && clock.getTime() - card.arrivedAt < DWELL_MS
 
   async function runDemoScan(event) {
     event.preventDefault()
@@ -36,13 +81,13 @@ export default function Kiosk() {
       </header>
 
       {showStudent ? (
-        <div className="scan-card" key={scan.id}>
+        <div className="scan-card" key={card.logId}>
           <Avatar student={student} size="xl" />
           <h1 className="scan-name">{fullName(student)}</h1>
           <p className="scan-grade">{student.grade_level}</p>
-          <Badge status={scan.status} />
-          <p className="scan-time">Checked in at {formatTime(scan.scan_time)}</p>
-          {scan.parent_notified && <p className="scan-note">Parent notified by email</p>}
+          <Badge status={row.status} />
+          <p className="scan-time">Checked in at {formatTime(row.scan_time)}</p>
+          {row.parent_notified && <p className="scan-note">Parent notified by email</p>}
         </div>
       ) : (
         <div className="welcome">
@@ -54,12 +99,10 @@ export default function Kiosk() {
           <h1 className="welcome-title">Welcome</h1>
           <p className="welcome-hint">Please place your finger on the scanner</p>
           <p className="welcome-count">
-            <strong>{logs.length}</strong> checked in today
+            <strong>{pulse?.checked_in ?? 0}</strong> checked in today
           </p>
         </div>
       )}
-
-      {loadError && <p className="kiosk-error">{loadError}</p>}
 
       {mode === 'demo' && (
         <form className="demo-bar" onSubmit={runDemoScan}>

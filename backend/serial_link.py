@@ -1,7 +1,9 @@
 """Serial transport to the Arduino, plus a keyboard-driven stand-in.
 
 Wire protocol (one line per message, newline terminated):
-    device -> host : BOOT | SCAN_READY | FOUND_ID:<n> | NOT_FOUND | ENROLLED:<n> | ERROR:<msg>
+    device -> host : BOOT | SCAN_READY | FOUND_ID:<n> | NOT_FOUND | ENROLLED:<n>
+                     ENROL_WAIT_1 | ENROL_SEEN_1 | ENROL_LIFT | ENROL_WAIT_2 |
+                     ENROL_SEEN_2 | ERROR:<msg>
     host -> device : E (capture a finger) | P (ping)
 """
 
@@ -23,24 +25,65 @@ class Link(Protocol):
 class SerialLink:
     """Reads the Arduino over a COM port, reconnecting if the device drops out."""
 
+    RECONNECT_SECONDS = 3
+
     def __init__(self, port: str, baud: int) -> None:
         import serial
 
-        self._serial = serial.Serial(port, baud, timeout=1)
+        self._serial_mod = serial
         self.port = port
+        self.baud = baud
+        self._serial = None
+        self._next_try = 0.0
+        self._warned = False
+        self._ever_opened = False
+
+    def _ensure_open(self) -> bool:
+        if self._serial is not None and self._serial.is_open:
+            return True
+        if time.time() < self._next_try:
+            return False
+        self._next_try = time.time() + self.RECONNECT_SECONDS
+        try:
+            self._serial = self._serial_mod.Serial(self.port, self.baud, timeout=1)
+        except Exception:
+            if not self._warned:
+                print(f"[serial] {self.port} not available - waiting for the Arduino to come back.")
+                self._warned = True
+            return False
+        self._warned = False
+        if self._ever_opened:
+            print(f"[serial] Reconnected to {self.port}.")
+        self._ever_opened = True
+        return True
 
     def read_line(self) -> str | None:
-        raw = self._serial.readline()
+        if not self._ensure_open():
+            time.sleep(0.2)
+            return None
+        try:
+            raw = self._serial.readline()
+        except Exception as exc:  # USB yanked or the port stolen mid-read
+            print(f"[serial] Link dropped ({exc}); will retry.")
+            self._serial = None
+            return None
         if not raw:
             return None
         return raw.decode(errors="ignore").strip()
 
     def send(self, command: str) -> None:
-        self._serial.write(f"{command}\n".encode())
-        self._serial.flush()
+        if not self._ensure_open():
+            return
+        try:
+            self._serial.write(f"{command}\n".encode())
+            self._serial.flush()
+        except Exception as exc:
+            print(f"[serial] Send failed ({exc}); will retry.")
+            self._serial = None
 
     def close(self) -> None:
-        self._serial.close()
+        if self._serial is not None:
+            self._serial.close()
 
 
 class SimulatedLink:
@@ -54,7 +97,7 @@ class SimulatedLink:
         threading.Thread(target=self._pump_stdin, daemon=True).start()
         print(
             "[simulator] No Arduino connected. Type a fingerprint ID to fake a scan, "
-            "'e <id>' to enrol, 'r' to list IDs, 'q' to quit."
+            "'e <id>' to enrol, 'd <id>' to clear a slot, 'r' to list IDs, 'q' to quit."
         )
 
     def _pump_stdin(self) -> None:
@@ -78,6 +121,9 @@ class SimulatedLink:
         if command.startswith("e"):
             rest = command[1:].strip()
             return f"ENROLLED:{int(rest)}" if rest.isdigit() else "ENROLLED:0"
+        if command.startswith("d"):
+            rest = command[1:].strip()
+            return f"DELETED:{int(rest)}" if rest.isdigit() else "DELETED:0"
         if command == "x":
             return "NOT_FOUND"
         return f"FOUND_ID:{int(command)}" if command.isdigit() else None
@@ -92,10 +138,6 @@ class SimulatedLink:
 def open_link(settings) -> Link:
     if not settings.has_serial:
         return SimulatedLink()
-    try:
-        return SerialLink(settings.arduino_port, settings.baud)
-    except Exception as exc:  # port vanished, wrong name, or Arduino IDE holding it
-        print(f"[serial] Could not open {settings.arduino_port}: {exc}")
-        print("[serial] Falling back to the keyboard simulator.")
-        time.sleep(0.2)
-        return SimulatedLink()
+    # Open lazily and keep retrying: a briefly-busy or unplugged port must not
+    # strand the service on the simulator (which exits when stdin is empty).
+    return SerialLink(settings.arduino_port, settings.baud)

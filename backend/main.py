@@ -2,12 +2,14 @@
 
     python main.py            # watch the Arduino (or the keyboard simulator)
     python main.py --once 3   # log a single scan for fingerprint ID 3 and exit
+    python main.py --clear 1  # wipe the template in sensor slot 1 and exit
     python main.py --status   # print how the service is configured
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime
 
 from capture import CaptureDriver
@@ -17,6 +19,10 @@ from notifier import Notifier
 from serial_link import open_link
 from service import handle_scan
 from staff_sync import provision_pending
+
+# Bumped with every backend change that the live rig must pick up; the tag
+# rides in the heartbeat so the web pill shows which build is actually running.
+BUILD = "2026-09-29a"
 
 
 def describe(settings, store, notifier) -> str:
@@ -62,7 +68,11 @@ def run_loop(link, store, notifier, settings) -> None:
         now = datetime.now().timestamp()
         if now - last_beat >= settings.heartbeat_seconds:
             last_beat = now
-            beat(True, "Capturing a fingerprint" if driver.active else "Listening for scans")
+            beat(
+                True,
+                f"{BUILD} · "
+                + ("Capturing a fingerprint" if driver.active else "Listening for scans"),
+            )
             provision_pending(store)
             driver.maybe_prune()
 
@@ -118,7 +128,33 @@ def main(argv: list[str]) -> int:
         handle_scan(store, notifier, settings, int(argv[index]))
         return 0
 
+    if "--clear" in argv:
+        index = argv.index("--clear") + 1
+        if index >= len(argv) or not argv[index].isdigit():
+            print("usage: python main.py --clear <slot>")
+            return 2
+        slot = int(argv[index])
+        link = open_link(settings)
+        try:
+            link.send(f"D:{slot}")
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                line = link.read_line()
+                if not line:
+                    continue
+                print(f"[sensor] {line}")
+                upper = line.upper()
+                if upper.startswith("DELETED"):
+                    return 0
+                if upper.startswith("ERROR"):
+                    return 1
+        finally:
+            link.close()
+        print("[clear] The sensor did not answer the delete request.")
+        return 1
+
     print("Smart Attendance backend")
+    print(f"build {BUILD}")
     print(describe(settings, store, notifier))
     link = open_link(settings)
     try:

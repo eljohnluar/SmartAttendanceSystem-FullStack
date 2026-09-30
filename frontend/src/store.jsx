@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, mode } from './lib/api.js'
 import { demoRole } from './lib/demo.js'
 import { getCurrentUser, signOut as endSession, watchAuth } from './lib/auth.js'
 import { AppContext } from './lib/useApp.js'
 
 const HEARTBEAT_STALE_SECONDS = 20
-// Matches the backend's own 5s heartbeat, so the pill and the log are never
-// more than one beat behind even if the realtime socket dies.
-const STATUS_POLL_MS = 5000
+// Backstop for changes the realtime socket silently misses; half the backend's
+// 5s heartbeat so even a dead socket lags by at most a couple of seconds.
+const STATUS_POLL_MS = 2500
 
 function describeBackend(status) {
   if (status?.connected) {
@@ -36,15 +36,14 @@ function describeBackend(status) {
 export function AppProvider({ children }) {
   const [students, setStudents] = useState([])
   const [logs, setLogs] = useState([])
+  const [marks, setMarks] = useState([])
   const [backend, setBackend] = useState(() => describeBackend(null))
-  const [scan, setScan] = useState(null)
   const [user, setUser] = useState(null)
   const [staff, setStaff] = useState(null)
   const [team, setTeam] = useState([])
   const [registrationOpen, setRegistrationOpen] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const seenLog = useRef({ id: null, at: 0 })
-  const primed = useRef(false)
+  const [timeRemaining, setTimeRemaining] = useState(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -52,18 +51,8 @@ export function AppProvider({ children }) {
       setStudents(roster ?? [])
       setLogs(today ?? [])
       setLoadError('')
-
-      const newest = today?.[0]
-      const at = newest ? Date.parse(newest.scan_time) : 0
-      // Only a scan *newer* than the last one seen is worth a kiosk card, so a
-      // reset that deletes today's rows cannot re-toast an old check-in.
-      if (!primed.current) {
-        primed.current = true
-        seenLog.current = { id: newest?.id ?? null, at }
-      } else if (newest && newest.id !== seenLog.current.id && at > seenLog.current.at) {
-        seenLog.current = { id: newest.id, at }
-        setScan({ ...newest, arrivedAt: Date.now() })
-      }
+      // A missing marks table must not take the roster down with it.
+      setMarks(await api.listMarks().catch(() => []))
     } catch (error) {
       setLoadError(error.message)
     }
@@ -116,7 +105,49 @@ export function AppProvider({ children }) {
     await endSession()
     setUser(null)
     setStaff(null)
+    setTimeRemaining(null)
+    // Drop the roster too, so a signed-out screen can never render class data
+    // left over in memory from the previous session.
+    setStudents([])
+    setLogs([])
+    setMarks([])
+    setTeam([])
+    // The Scan Station is the signed-out face of the app, so signing out from
+    // any role lands back on it instead of the login form.
+    window.location.hash = '#/kiosk'
   }, [])
+
+  // Auto-start the countdown when a staff member signs in
+  useEffect(() => {
+    if (staff?.status === 'active' && timeRemaining === null) {
+      const hours = staff.max_session_hours ?? 8
+      setTimeRemaining(hours * 3600)
+    }
+  }, [staff?.status, staff?.max_session_hours, timeRemaining === null])
+
+  // Countdown timer: ticks every second, auto-logs out at zero
+  useEffect(() => {
+    if (timeRemaining === null || timeRemaining <= 0) return undefined
+    const timer = setInterval(() => {
+      setTimeRemaining((prev) => (prev === null ? null : Math.max(prev - 1, 0)))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [timeRemaining === null])
+
+  // Auto-logout when the countdown reaches zero — redirects to the attendance page
+  useEffect(() => {
+    if (timeRemaining === 0) {
+      endSession()
+      setUser(null)
+      setStaff(null)
+      setTimeRemaining(null)
+      setStudents([])
+      setLogs([])
+      setMarks([])
+      setTeam([])
+      window.location.hash = '#/attendance'
+    }
+  }, [timeRemaining])
 
   // public = signed out, pending/failed = a login with no usable staff row
   const access = useMemo(() => {
@@ -127,12 +158,20 @@ export function AppProvider({ children }) {
     return staff.status
   }, [user, staff])
 
+  const setMaxSessionHours = useCallback(async (staffId, hours) => {
+    const row = await api.setMaxSessionHours(staffId, hours)
+    if (staffId === staff?.id) {
+      setStaff(row)
+    }
+    setTeam((prev) => prev.map((r) => (r.id === staffId ? row : r)))
+  }, [staff?.id])
+
   const value = useMemo(
     () => ({
       mode,
       students,
       logs,
-      scan,
+      marks,
       backend,
       loadError,
       user,
@@ -140,12 +179,14 @@ export function AppProvider({ children }) {
       team,
       access,
       registrationOpen,
+      timeRemaining,
       refresh,
       refreshStaff,
       signOut,
+      setMaxSessionHours,
       simulateScan: api.simulateScan,
     }),
-    [students, logs, scan, backend, loadError, user, staff, team, access, registrationOpen, refresh, refreshStaff, signOut],
+    [students, logs, marks, backend, loadError, user, staff, team, access, registrationOpen, timeRemaining, refresh, refreshStaff, signOut, setMaxSessionHours],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

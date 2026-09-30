@@ -30,7 +30,7 @@ export default function Login({ onSignedIn }) {
       <form className="card login-card" onSubmit={submit}>
         <h1>Staff sign in</h1>
         <p className="page-sub">
-          Staff sign in to see the kiosk, attendance and enrollment. An admin adds teachers from the
+          Staff sign in to see the kiosk, attendance and enrollment. An admin adds professors from the
           Staff page, or sign up to create the first admin.
         </p>
 
@@ -72,6 +72,10 @@ export default function Login({ onSignedIn }) {
             Sign up
           </a>
         </div>
+
+        <a className="login-kiosk" href="#/kiosk">
+          Back to the Scan Station
+        </a>
       </form>
     </section>
   )

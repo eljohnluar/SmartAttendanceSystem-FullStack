@@ -46,9 +46,21 @@ class CaptureDriver:
         # Ask for the student's own Fingerprint ID so the sensor slot and the
         # database row cannot drift apart.
         target = pending.get("target_slot")
-        link.send(f"E:{target}" if target else "E")
         self.active = pending
         self.deadline = time.time() + self.timeout
+
+        # A transferred student's old template would still match their finger
+        # and could be handed to whoever gets that slot next, so clear it.
+        if (pending.get("action") or "enroll") == "delete":
+            if not target:
+                self._settle({"status": "failed", "error": "A clear needs a target slot"})
+                return
+            link.send(f"D:{target}")
+            self.store.update_capture(pending["id"], {"status": "capturing", "updated_at": _now()})
+            print(f"[capture] Clearing stale slot {target} on the sensor…")
+            return
+
+        link.send(f"E:{target}" if target else "E")
         self.store.update_capture(pending["id"], {"status": "capturing", "updated_at": _now()})
         print(f"[capture] Sensor is listening for a finger (slot {target or 'auto'})…")
 
@@ -63,6 +75,11 @@ class CaptureDriver:
             self._settle({"status": "done", "fingerprint_id": captured})
             print(f"[capture] Stored as fingerprint ID {captured}")
             return True
+        if verb == "DELETED" and value.strip().isdigit():
+            cleared = int(value.strip())
+            self._settle({"status": "done", "fingerprint_id": None})
+            print(f"[capture] Stale slot {cleared} cleared on the sensor")
+            return True
         if verb == "ERROR":
             reason = line.split(":", 1)[1] if ":" in line else line
             self._settle({"status": "failed", "error": reason[:300]})
@@ -70,9 +87,15 @@ class CaptureDriver:
             return True
 
         if verb == "ENROL_WAIT_1":
-            print("[capture] Stage 1 of 2 — press the finger flat and hold still")
+            self._advance("place_1", "Stage 1 of 2 — press the finger flat and hold still")
+        elif verb == "ENROL_SEEN_1":
+            self._advance("seen_1", "Finger detected — reading the first print")
+        elif verb == "ENROL_LIFT":
+            self._advance("lift", "First print taken — lift the finger off the sensor")
         elif verb == "ENROL_WAIT_2":
-            print("[capture] Stage 2 of 2 — lift it off completely, then press the same finger again")
+            self._advance("place_2", "Stage 2 of 2 — press the same finger again")
+        elif verb == "ENROL_SEEN_2":
+            self._advance("seen_2", "Finger detected — reading the second print")
         self.check_timeout()
         return True
 
@@ -80,6 +103,14 @@ class CaptureDriver:
         if self.active and time.time() > self.deadline:
             self._settle({"status": "expired", "error": "No finger was captured in time"})
             print("[capture] Timed out waiting for a finger")
+
+    def _advance(self, step: str, message: str) -> None:
+        """Publishes the stage the sensor reached so the web form can coach the user."""
+        try:
+            self.store.update_capture(self.active["id"], {"step": step, "updated_at": _now()})
+        except Exception as error:
+            print(f"[capture] Could not record the stage: {error}")
+        print(f"[capture] {message}")
 
     def maybe_prune(self) -> None:
         if self.store.name != "supabase":
