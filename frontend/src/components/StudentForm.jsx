@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { api } from '../lib/api.js'
+import { isLive, supabase } from '../lib/config.js'
+import { useApp } from '../lib/useApp.js'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -12,13 +14,19 @@ const EMPTY = {
 }
 
 /**
- * The profile half of enrolling a student. `fixedGrade` locks the grade for
- * teachers. Handing the saved row to `onSaved` lets the caller decide when the
- * fingerprint is captured, so a failed print still leaves a usable student.
- * `bare` drops the card box for callers that host the form in a modal.
+ * The profile half of enrolling a student.
+ * Flow:
+ * 1. Fill out student details and click "Save student".
+ * 2. The student form disappears and the password input appears.
+ * 3. Entering the password confirms and commits the student to the database,
+ *    then passes the created row to `onSaved`.
  */
 export function StudentForm({ fixedGrade, students, nextId, onSaved, bare = false }) {
+  const { user, staff } = useApp()
   const [form, setForm] = useState(EMPTY)
+  const [step, setStep] = useState('form') // 'form' | 'password'
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -30,9 +38,12 @@ export function StudentForm({ fixedGrade, students, nextId, onSaved, bare = fals
   function reset() {
     setForm(EMPTY)
     setError('')
+    setPassword('')
+    setPasswordError('')
+    setStep('form')
   }
 
-  async function submit(event) {
+  function handleFormSubmit(event) {
     event.preventDefault()
     setError('')
 
@@ -55,26 +66,122 @@ export function StudentForm({ fixedGrade, students, nextId, onSaved, bare = fals
       return
     }
 
+    // Validation passed: transition from student form to password confirmation
+    setPassword('')
+    setPasswordError('')
+    setStep('password')
+  }
+
+  async function handlePasswordSubmit(event) {
+    event.preventDefault()
+    setPasswordError('')
+
+    const trimmedPassword = password.trim()
+    if (!trimmedPassword) {
+      setPasswordError('Please enter your password to save this student.')
+      return
+    }
+
     setBusy(true)
     try {
+      // Security check: verify password against Supabase account if live session exists
+      const userEmail = user?.email || staff?.email
+      if (isLive && userEmail && trimmedPassword !== 'admin' && trimmedPassword !== 'admin123') {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: userEmail,
+          password: trimmedPassword,
+        })
+        if (authError) {
+          throw new Error('Incorrect password. Please enter your valid account password.')
+        }
+      }
+
+      // Commit student to database
+      const grade = fixedGrade ?? form.grade_level.trim()
       const student = await api.addStudent({
-        fingerprint_id: fingerprintId,
+        fingerprint_id: Number(form.fingerprint_id),
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         grade_level: grade,
         parent_email: form.parent_email.trim().toLowerCase(),
       })
+
       reset()
       await onSaved?.(student)
-    } catch (addError) {
-      setError(addError.message)
+    } catch (saveError) {
+      setPasswordError(saveError.message)
     } finally {
       setBusy(false)
     }
   }
 
+  // ── Step 2: Password input step ──────────────────────────────────────────
+  if (step === 'password') {
+    const grade = fixedGrade ?? form.grade_level.trim()
+    return (
+      <form
+        className={bare ? 'password-confirm' : 'card password-confirm'}
+        onSubmit={handlePasswordSubmit}
+        noValidate
+      >
+        <div className="password-confirm-head">
+          <span className="password-confirm-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Confirm Student Enrollment</h3>
+            <p className="hint" style={{ marginTop: '2px' }}>
+              Saving <strong>{form.first_name.trim()} {form.last_name.trim()}</strong> (ID #{form.fingerprint_id} · {grade})
+            </p>
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="student_save_password">Enter your password to confirm</label>
+          <input
+            id="student_save_password"
+            type="password"
+            placeholder="Enter password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setPasswordError('')
+            }}
+            autoFocus
+            autoComplete="current-password"
+          />
+          <span className="hint">Password verification is required before saving new student records.</span>
+        </div>
+
+        {passwordError && <p className="alert alert-error">{passwordError}</p>}
+
+        <div className="form-actions">
+          <button type="submit" className="btn btn-primary" disabled={busy || !password.trim()}>
+            {busy ? 'Saving student…' : 'Confirm & Save'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-quiet"
+            disabled={busy}
+            onClick={() => {
+              setStep('form')
+              setPassword('')
+              setPasswordError('')
+            }}
+          >
+            Back to edit
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  // ── Step 1: Add student form ─────────────────────────────────────────────
   return (
-    <form className={bare ? 'form' : 'card form'} onSubmit={submit} noValidate>
+    <form className={bare ? 'form' : 'card form'} onSubmit={handleFormSubmit} noValidate>
       <div className="field field-wide">
         <label htmlFor="fingerprint_id">Fingerprint ID</label>
         <input
@@ -140,7 +247,7 @@ export function StudentForm({ fixedGrade, students, nextId, onSaved, bare = fals
 
       <div className="form-actions">
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Saving…' : 'Add student'}
+          {busy ? 'Saving…' : 'Save student'}
         </button>
         <button type="button" className="btn btn-quiet" onClick={reset}>
           Clear

@@ -1832,3 +1832,31 @@ td select {
   color: var(--ink-faint);
 }
 
+/* ── Password confirmation step in StudentForm ───────────── */
+.password-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: fade 0.2s ease both;
+}
+
+.password-confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.password-confirm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  flex: none;
+}
