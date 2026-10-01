@@ -1,12 +1,12 @@
 /* ── Tokens ─────────────────────────────────────────────── */
 :root {
-  --ink: #000000;
-  --ink-soft: #000000;
-  --ink-faint: #000000;
+  --ink: #14161a;
+  --ink-soft: #4b5158;
+  --ink-faint: #8b929b;
   --line: #eaecef;
   --line-strong: #d8dbdf;
   --surface: #ffffff;
-  --surface-soft: #ffffff;
+  --surface-soft: #f7f8f9;
   --present: #127a43;
   --present-soft: #e6f4ec;
   --late: #9a5b00;
@@ -87,8 +87,8 @@ code {
   gap: 16px;
   height: var(--topbar-h);
   padding: 0 24px;
-  background: #14161a;
-  border-bottom: 1px solid #14161a;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar-actions {
@@ -112,7 +112,7 @@ code {
 }
 
 .profile-btn:hover {
-  box-shadow: 0 0 0 3px #26292f;
+  box-shadow: 0 0 0 3px var(--surface-soft);
 }
 
 .profile-menu {
@@ -178,8 +178,8 @@ code {
   flex-direction: column;
   gap: 26px;
   padding: 22px 18px;
-  border-right: 1px solid #14161a;
-  background: #14161a;
+  border-right: 1px solid var(--line);
+  background: var(--surface-soft);
 }
 
 .brand {
@@ -188,15 +188,13 @@ code {
   gap: 10px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: #ffffff;
 }
 
 .brand-mark {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #14b8a6);
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
+  background: var(--ink);
   flex: none;
 }
 
@@ -209,7 +207,7 @@ code {
 
 .side-nav a {
   text-decoration: none;
-  color: #b6bcc3;
+  color: var(--ink-soft);
   padding: 9px 12px;
   border-radius: 9px;
   font-size: 14px;
@@ -217,112 +215,24 @@ code {
 }
 
 .side-nav a:hover {
-  background: #26292f;
-  color: #ffffff;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .side-nav a.is-active {
-  background: linear-gradient(100deg, #6366f1, #14b8a6);
-  color: #ffffff;
-  font-weight: 600;
+  background: var(--ink);
+  color: #fff;
 }
 
 /* Guests and unprovisioned logins: no navigation, just the auth card. */
 .bare {
   min-height: 100vh;
   display: flex;
-  background: #14161a;
+  background: var(--surface-soft);
 }
 
 .bare .login-card {
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.35);
-}
-
-.bare .login-kiosk {
-  color: #b6bcc3;
-}
-
-.bare .login-kiosk:hover {
-  color: #ffffff;
-}
-
-.kiosk-bare {
-  position: relative;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: #14161a;
-  color: #ffffff;
-}
-
-.kiosk-bare .eyebrow,
-.kiosk-bare .kiosk-clock,
-.kiosk-bare .welcome-hint,
-.kiosk-bare .welcome-count,
-.kiosk-bare .scan-note,
-.kiosk-bare .finger-mark {
-  color: #b6bcc3;
-}
-
-.kiosk-bare .welcome-title,
-.kiosk-bare .scan-name,
-.kiosk-bare .welcome-count strong {
-  color: #ffffff;
-}
-
-.kiosk-bare .scan-grade,
-.kiosk-bare .scan-time {
-  color: #e8eaed;
-}
-
-.kiosk-bare .welcome-count {
-  border-top-color: #2c3138;
-}
-
-.kiosk-bare .avatar-xl {
-  background: #26292f;
-}
-
-.kiosk-bare .kiosk-signin {
-  color: #8b929b;
-}
-
-.kiosk-bare .kiosk-signin:hover {
-  color: #ffffff;
-}
-
-.kiosk-bare .demo-bar {
-  background: #1d2025;
-  border-color: #2c3138;
-  color: #b6bcc3;
-}
-
-.kiosk-bare .demo-bar input {
-  background: #14161a;
-  border-color: #2c3138;
-  color: #ffffff;
-}
-
-.kiosk-bare .demo-error {
-  color: #f28b82;
-}
-
-.kiosk-bare .kiosk {
-  min-height: 100vh;
-}
-
-.kiosk-signin {
-  position: absolute;
-  bottom: 18px;
-  right: 24px;
-  font-size: 13px;
-  color: var(--ink-faint);
-  text-decoration: none;
-}
-
-.kiosk-signin:hover {
-  color: var(--ink);
-  text-decoration: underline;
+  box-shadow: 0 10px 34px rgba(20, 22, 26, 0.07);
 }
 
 .mode-tag {
@@ -330,29 +240,6 @@ code {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
-}
-
-.topbar .mode-tag {
-  color: #8b929b;
-}
-
-.topbar .pill {
-  color: #e8eaed;
-  border-color: #2c3138;
-}
-
-.topbar .pill-online {
-  color: #7ddba3;
-  border-color: #1f4b38;
-}
-
-.topbar .pill-stale .pill-dot,
-.topbar .pill-demo .pill-dot {
-  background: #d99a2b;
-}
-
-.topbar .pill-offline .pill-dot {
-  background: #f28b82;
 }
 
 .main {
@@ -552,7 +439,7 @@ select {
 }
 
 input::placeholder {
-  color: #000000;
+  color: #b6bcc3;
 }
 
 input[readonly] {
@@ -652,71 +539,6 @@ select:disabled {
   font-weight: 600;
 }
 
-/* ── Live capture stages in the enroll modal ────────────── */
-.scan-steps {
-  list-style: none;
-  margin: 14px 0 0;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-}
-
-.scan-step {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: var(--surface-soft);
-  font-size: 12.5px;
-  color: var(--ink-faint);
-}
-
-.scan-step-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--line-strong);
-}
-
-.scan-step-active,
-.scan-step-seen {
-  border-color: #cbe6d6;
-  background: var(--present-soft);
-  color: var(--present);
-  font-weight: 600;
-}
-
-.scan-step-active .scan-step-dot,
-.scan-step-seen .scan-step-dot {
-  background: var(--present);
-}
-
-.scan-step-seen .scan-step-dot {
-  animation: scan-pulse 0.9s ease-in-out infinite;
-}
-
-@keyframes scan-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 var(--present-soft);
-  }
-  50% {
-    box-shadow: 0 0 0 5px var(--present-soft);
-  }
-}
-
-.scan-step-done {
-  color: var(--ink-soft);
-}
-
-.scan-step-done .scan-step-dot {
-  background: var(--present);
-}
-
 .password-row {
   display: flex;
   gap: 10px;
@@ -751,12 +573,12 @@ select:disabled {
 }
 
 .btn-primary {
-  background: linear-gradient(100deg, #4f46e5, #0d9488);
+  background: var(--ink);
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(100deg, #4338ca, #0f766e);
+  background: #2c3138;
 }
 
 .btn-primary:disabled {
@@ -886,105 +708,6 @@ select:disabled {
   animation: breathe 2.6s ease-in-out infinite;
 }
 
-/* ── Fingerprint scanner art (Uiverse.io SRIMANKS, scoped) ── */
-.finger-scan {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  padding-bottom: 46px;
-  transition: 0.2s;
-}
-
-.finger-scan:hover {
-  transform: scale(1.05);
-  transition: 0.2s;
-  filter: drop-shadow(0px 0px 10px rgb(0, 247, 255));
-}
-
-.finger-scan::after {
-  content: 'scanning';
-  height: fit-content;
-  width: 100%;
-  color: lightskyblue;
-  position: absolute;
-  z-index: 2;
-  bottom: 15%;
-  text-align: center;
-  animation: 2s finger-dots infinite;
-  font-size: 13px;
-}
-
-.finger-scan::before {
-  content: '';
-  height: 0.1em;
-  width: 80%;
-  border-radius: 10px;
-  background-color: rgb(0, 200, 255);
-  position: absolute;
-  z-index: 2;
-  bottom: 10%;
-  animation: 4s finger-grow infinite;
-  align-self: flex-start;
-  margin-left: 10%;
-  filter: drop-shadow(0px 0px 10px #3fefef) drop-shadow(0px 0px 10px #3fefef);
-}
-
-.finger-scan svg {
-  filter: drop-shadow(0px 0px 10px #3fefef) drop-shadow(0px 0px 50px #3fefef);
-}
-
-.finger-scan path {
-  stroke-dasharray: 90;
-  animation: finger-loop 4s infinite;
-}
-
-@keyframes finger-loop {
-  0% {
-    stroke-dashoffset: 50;
-    stroke-dasharray: 90;
-  }
-  50% {
-    stroke-dashoffset: 100;
-    stroke-dasharray: 50;
-  }
-  100% {
-    stroke-dashoffset: 50;
-    stroke-dasharray: 90;
-  }
-}
-
-@keyframes finger-dots {
-  0% {
-    content: 'scanning.';
-  }
-  25% {
-    content: 'scanning..';
-  }
-  50% {
-    content: 'scanning...';
-  }
-  75% {
-    content: 'scanning';
-  }
-  100% {
-    content: 'scanning.';
-  }
-}
-
-@keyframes finger-grow {
-  0% {
-    width: 0%;
-  }
-  50% {
-    width: 80%;
-  }
-  100% {
-    width: 0%;
-  }
-}
-
 .welcome-title {
   font-size: 46px;
   letter-spacing: -0.03em;
@@ -1078,6 +801,17 @@ select:disabled {
   color: var(--danger);
 }
 
+/* ── Time tracking ──────────────────────────────────────── */
+.time-card {
+  margin-bottom: 26px;
+}
+
+.hours-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
 /* ── Dashboard ──────────────────────────────────────────── */
 .btn-danger {
   background: transparent;
@@ -1125,7 +859,7 @@ select:disabled {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 26px;
 }
@@ -1362,20 +1096,6 @@ td em {
   gap: 14px;
   border-top: 1px solid var(--line);
   padding-top: 18px;
-}
-
-.login-kiosk {
-  display: block;
-  margin-top: 14px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--ink-faint);
-  text-decoration: none;
-}
-
-.login-kiosk:hover {
-  color: var(--ink);
-  text-decoration: underline;
 }
 
 .login-alt .btn {
@@ -1648,17 +1368,6 @@ td select {
   margin-bottom: 12px;
 }
 
-/* ── Time tracking ──────────────────────────────────────── */
-.time-card {
-  margin-bottom: 26px;
-}
-
-.hours-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
 /* ── Motion ─────────────────────────────────────────────── */
 @keyframes rise {
   from {
@@ -1708,7 +1417,7 @@ td select {
     position: static;
     padding: 10px 14px;
     border-right: 0;
-    border-bottom: 1px solid #14161a;
+    border-bottom: 1px solid var(--line);
     overflow-x: auto;
   }
 
