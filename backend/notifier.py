@@ -5,6 +5,7 @@ Provider is chosen by which credentials exist:
     Resend  ~100/day free, needs a verified sending domain -> RESEND_API_KEY
     Gmail   SMTP with an app password, ~50/day on a free account
     Console prints the email when nothing is configured
+    off     Explicitly disabled — no emails sent, nothing printed
 """
 
 from __future__ import annotations
@@ -127,6 +128,9 @@ class SmtpSender:
 
 def build_sender(settings):
     forced = settings.email_provider
+    if forced == "off":
+        # Explicitly disabled — return console sender so nothing real is sent
+        return ConsoleSender()
     if forced == "brevo" or (forced == "auto" and settings.brevo_api_key):
         return BrevoSender(settings.brevo_api_key, settings.email_sender_name, settings.sender_address)
     if forced == "resend" or (forced == "auto" and settings.resend_api_key):
@@ -147,6 +151,7 @@ class Notifier:
         return self._sender.provider
 
     def notify_arrival(self, student: dict, scan_time_local, status: str) -> bool:
+        """Notify parent when a student's fingerprint is scanned at the kiosk."""
         name = f"{student['first_name']} {student['last_name']}".strip()
         arrived_at = scan_time_local.strftime("%I:%M %p").lstrip("0")
         grade = student.get("grade_level", "")
@@ -184,4 +189,58 @@ class Notifier:
         if sent:
             self.sent_count += 1
             print(f"[email] {self._sender.provider}: notified {name} -> {recipient}")
+        return sent
+
+    def notify_manual_attendance(self, student: dict, marked_at, status: str, marked_by: str = "") -> bool:
+        """Notify parent when a teacher manually marks attendance from the dashboard.
+
+        Uses wording that makes clear the record was entered by school staff
+        rather than captured automatically by the fingerprint sensor.
+        """
+        name = f"{student['first_name']} {student['last_name']}".strip()
+        time_str = marked_at.strftime("%I:%M %p").lstrip("0")
+        grade = student.get("grade_level", "")
+
+        status_verb = {
+            "Present": "marked present",
+            "Late": "marked late",
+            "Absent": "marked absent",
+        }.get(status, f"marked as {status.lower()}")
+
+        by_line = f" by {marked_by}" if marked_by else ""
+        subject = f"Attendance update for {name} — {status}"
+        text = (
+            f"Dear Parent/Guardian,\n\n"
+            f"Your child {name}{f' ({grade})' if grade else ''} was {status_verb}"
+            f"{by_line} at {time_str} today.\n\n"
+            f"If you have questions, please contact the school.\n\n"
+            f"Sent automatically by the school attendance system."
+        )
+
+        status_bg = {"Present": "#e6f4ec", "Late": "#fbf0dd", "Absent": "#fde8e8"}.get(status, "#f0f0f0")
+        status_fg = {"Present": "#127a43", "Late": "#9a5b00", "Absent": "#b91c1c"}.get(status, "#444")
+        html = (
+            '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;'
+            'max-width:520px;margin:0 auto;padding:36px 24px;color:#14161a">'
+            '<p style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8b929b">'
+            "Smart Attendance — Manual Record</p>"
+            f'<h1 style="font-size:26px;margin:14px 0 6px;letter-spacing:-.02em">Attendance update for {name}</h1>'
+            f'<p style="color:#4b5158;margin:0">Grade: {grade or "&mdash;"}</p>'
+            f'<p style="color:#4b5158;margin:6px 0 4px">Time recorded: {time_str}</p>'
+            f'<p style="color:#4b5158;margin:0 0 22px">Recorded{by_line} by school staff.</p>'
+            f'<p style="display:inline-block;font-size:13px;font-weight:600;letter-spacing:.12em;'
+            f'padding:8px 18px;border-radius:999px;background:{status_bg};color:{status_fg}">{status.upper()}</p>'
+            '<p style="margin-top:26px;font-size:12px;color:#8b929b">'
+            "If you believe this is an error, please contact the school directly.</p></div>"
+        )
+
+        recipient = student.get("parent_email")
+        if not recipient:
+            print("[email] Skipped manual notify: student has no parent_email.")
+            return False
+
+        sent = self._sender.send(Message(recipient, name, subject, text, html))
+        if sent:
+            self.sent_count += 1
+            print(f"[email] {self._sender.provider}: manual notify for {name} -> {recipient} ({status})")
         return sent

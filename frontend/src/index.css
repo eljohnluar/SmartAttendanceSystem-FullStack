@@ -1743,3 +1743,92 @@ td select {
     font-size: 34px;
   }
 }
+
+/* ── Manual attendance marking ─────────────────────────── */
+.btn-sm {
+  padding: 6px 13px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.btn-mark {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.btn-mark-present {
+  background: var(--present-soft);
+  color: var(--present);
+  border-color: #c4dece;
+}
+
+.btn-mark-present:hover:not(:disabled) {
+  background: #d0eddb;
+}
+
+.btn-mark-late {
+  background: var(--late-soft);
+  color: var(--late);
+  border-color: #e8d5b4;
+}
+
+.btn-mark-late:hover:not(:disabled) {
+  background: #f5e5c7;
+}
+
+.btn-mark-absent {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: #f0c5c3;
+}
+
+.btn-mark-absent:hover:not(:disabled) {
+  background: #fad5d3;
+}
+
+.manual-mark {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.mark-note {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.mark-note.ok {
+  color: var(--present);
+  background: var(--present-soft);
+}
+
+.mark-note.err {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.roster-row {
+  transition: background 0.12s;
+}
+
+.roster-row:hover {
+  background: var(--surface-soft);
+}
+
+.roster-row-open {
+  background: var(--surface-soft);
+}
+
+.mark-row td {
+  background: var(--surface-soft);
+  padding-top: 0;
+}
+
+.expand-caret {
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+

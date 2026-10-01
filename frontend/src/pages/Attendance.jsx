@@ -290,8 +290,21 @@ export default function Dashboard() {
   /** '' means "no override — go by the scan", which deletes the mark row. */
   async function setMark(student, status) {
     try {
-      if (status) await api.saveMark(student.id, status)
-      else await api.clearMark(student.id)
+      if (status) {
+        await api.saveMark(student.id, status)
+        if (student.parent_email) {
+          api.notifyParent?.({
+            student,
+            status,
+            scanTime: new Date().toISOString(),
+            markedBy: staff?.full_name ?? '',
+          }).catch((notifyErr) => {
+            console.warn('[email] Could not notify parent via Brevo:', notifyErr.message)
+          })
+        }
+      } else {
+        await api.clearMark(student.id)
+      }
       await refresh()
     } catch (markError) {
       window.alert(markError.message)

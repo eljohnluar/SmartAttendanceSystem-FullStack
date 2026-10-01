@@ -120,6 +120,65 @@ export const api = {
     return data
   },
 
+  /**
+   * Manually insert an attendance log for a student (teacher-triggered).
+   * Returns the created row.
+   */
+  async markAttendance(studentId, status) {
+    if (!isLive) {
+      // Demo shim: insert a synthetic log row
+      return demo.insertAttendance?.({ student_id: studentId, status, scan_time: new Date().toISOString(), parent_notified: false })
+    }
+    const { data, error } = await supabase
+      .from('attendance_logs')
+      .insert({ student_id: studentId, status, scan_time: new Date().toISOString(), parent_notified: false })
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /**
+   * Call the notify-parent Edge Function to email the parent via Brevo
+   * and flip parent_notified on the attendance log.
+   *
+   * @param {object} params
+   * @param {string} params.logId       - attendance_logs.id
+   * @param {object} params.student     - { first_name, last_name, grade_level, parent_email }
+   * @param {string} params.status      - "Present" | "Late" | "Absent"
+   * @param {string} params.scanTime    - ISO timestamp
+   * @param {string} [params.markedBy]  - Teacher name (optional)
+   */
+  async notifyParent({ logId, student, status, scanTime, markedBy = '' }) {
+    if (!isLive) {
+      console.log('[demo] notifyParent skipped in demo mode')
+      return { sent: false }
+    }
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/notify-parent`
+    const resp = await fetch(fnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        log_id: logId,
+        student,
+        status,
+        scan_time: scanTime,
+        marked_by: markedBy,
+      }),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }))
+      throw new Error(err.error ?? 'Failed to send parent notification')
+    }
+    return resp.json()
+  },
+
   async getStatus() {
     if (!isLive) return demo.getStatus()
     const { data } = await supabase.from('backend_status').select('*').eq('id', 1).maybeSingle()
