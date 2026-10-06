@@ -9,8 +9,11 @@ import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import AddStaff from './pages/admin/AddStaff.jsx'
 import Reports from './pages/admin/Reports.jsx'
+import StudentManagement from './pages/admin/StudentManagement.jsx'
 import TeacherManagement from './pages/admin/TeacherManagement.jsx'
 import Students from './pages/Students.jsx'
+import MyProfile from './pages/teacher/MyProfile.jsx'
+import TeacherReports from './pages/teacher/TeacherReports.jsx'
 import { AppProvider } from './store.jsx'
 import { useApp } from './lib/useApp.js'
 
@@ -24,9 +27,12 @@ const ROUTES = [
   { path: 'home', label: 'Dashboard', View: Home, roles: STAFF },
   { path: 'add-staff', label: 'Add Staff', View: AddStaff, roles: ADMIN },
   { path: 'teachers', label: 'Professor Management', View: TeacherManagement, roles: ADMIN },
+  { path: 'roster', label: 'Student Management', View: StudentManagement, roles: ADMIN },
   { path: 'students', label: 'My Students', View: Students, roles: ['teacher'] },
   { path: 'attendance', label: 'Attendance', View: Attendance, roles: STAFF },
   { path: 'reports', label: 'Reports', View: Reports, roles: ADMIN },
+  { path: 'my-reports', label: 'Reports', View: TeacherReports, roles: ['teacher'] },
+  { path: 'profile', label: 'My Profile', View: MyProfile, roles: ['teacher'] },
   { path: 'register', label: 'Register', View: Register, roles: ['public'], hidden: true },
   { path: 'login', label: 'Sign in', View: Login, roles: ['public'], hidden: true },
 ]
@@ -42,8 +48,8 @@ function Bare({ access, user, staff, onSignOut }) {
     return (
       <Notice title="Waiting for approval">
         <p>
-          {user?.email} has an account but no role yet. An admin assigns grades from the Staff page,
-          and the Python service finishes creating the login — it has to be running for that.
+          {user?.email} has an account but no role yet. An admin assigns grades from the Staff page, and the
+          Python service finishes creating the login — it has to be running for that.
         </p>
         <p>
           <button type="button" className="link-btn" onClick={onSignOut}>
@@ -57,8 +63,8 @@ function Bare({ access, user, staff, onSignOut }) {
   return (
     <Notice title="Account could not be created">
       <p>
-        The backend tried to provision {user?.email} and failed: {staff?.error || 'no reason given'}
-        . An admin can retry from the Staff page.
+        The backend tried to provision {user?.email} and failed: {staff?.error || 'no reason given'}. An admin
+        can retry from the Staff page.
       </p>
       <p>
         <button type="button" className="link-btn" onClick={onSignOut}>

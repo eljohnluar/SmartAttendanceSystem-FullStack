@@ -109,7 +109,7 @@ function ManualMarkRow({ student, log, staff, onDone }) {
 }
 
 export default function TeacherHome() {
-  const { students, logs, marks, staff, refresh } = useApp()
+  const { students, logs, marks, staff, grades, refresh } = useApp()
   const [expanded, setExpanded] = useState(null)
   const stats = summarize(students, logs, marks)
   const roster = rosterWithStatus(students, logs, marks)
@@ -124,7 +124,8 @@ export default function TeacherHome() {
         <h1>Dashboard</h1>
         <p className="page-sub">
           {staff?.full_name ? `${staff.full_name} · ` : ''}
-          {staff?.grade_level ?? 'No grade assigned'} · {formatDateLong()}
+          {grades.length ? grades.join(' · ') : 'No grade assigned'}
+          {staff?.sections?.length ? ` · ${staff.sections.join(', ')}` : ''} · {formatDateLong()}
         </p>
       </header>
 
@@ -154,7 +155,7 @@ export default function TeacherHome() {
         </p>
         {roster.length === 0 ? (
           <p className="muted">
-            No students are assigned to your grade yet. Use <a href="#/students">Students</a> to add
+            No students are assigned to your grades yet. Use <a href="#/students">Students</a> to add
             them.
           </p>
         ) : (

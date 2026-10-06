@@ -5,8 +5,8 @@ import { summarize } from '../../lib/attendance.js'
 import { RANGES, buildDays, notificationSplit } from '../../lib/reporting.js'
 import { useApp } from '../../lib/useApp.js'
 
-export default function Reports() {
-  const { students, team, logs } = useApp()
+export default function TeacherReports() {
+  const { students, logs, marks } = useApp()
   const [range, setRange] = useState(RANGES[0])
   const [ranged, setRanged] = useState([])
   const [error, setError] = useState('')
@@ -28,34 +28,19 @@ export default function Reports() {
   }, [load])
 
   const days = useMemo(() => buildDays(ranged, students, range.days), [ranged, students, range])
-  // `logs` is today only; `ranged` spans the picker. Do not mix them up.
-  const today = summarize(students, logs)
+  const today = summarize(students, logs, marks)
+  const { sent, pending } = notificationSplit(ranged)
 
-  const perGrade = useMemo(() => {
+  const perClass = useMemo(() => {
     const counts = new Map()
     for (const student of students) {
-      counts.set(student.grade_level, (counts.get(student.grade_level) ?? 0) + 1)
+      const label = `${student.grade_level || 'Unassigned'}${student.section ? ` · ${student.section}` : ''}`
+      counts.set(label, (counts.get(label) ?? 0) + 1)
     }
     return [...counts.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [students])
-
-  const teachersByClass = useMemo(() => {
-    const counts = new Map()
-    for (const student of students) {
-      counts.set(student.grade_level, (counts.get(student.grade_level) ?? 0) + 1)
-    }
-    return team
-      .filter((row) => row.role === 'teacher')
-      .map((row) => ({
-        label: `${row.full_name.split(' ')[0]} · ${row.grade_level ?? 'unassigned'}`,
-        value: row.grade_level ? (counts.get(row.grade_level) ?? 0) : 0,
-      }))
-      .sort((a, b) => b.value - a.value)
-  }, [team, students])
-
-  const { sent, pending } = notificationSplit(ranged)
 
   return (
     <section className="page">
@@ -63,7 +48,7 @@ export default function Reports() {
         <div>
           <h1>Reports</h1>
           <p className="page-sub">
-            {error ? error : `${ranged.length} scans across the last ${range.days} days`}
+            {error ? error : `${ranged.length} scans across the last ${range.days} days`} · your classes only
           </p>
         </div>
         <div className="range-picker">
@@ -106,18 +91,14 @@ export default function Reports() {
             ]}
           />
           <p className="hint">
-            Counts are capped at one scan per student, so a re-scan does not inflate the class.
+            A status you set on the Attendance page counts ahead of the scan, and a re-scan never counts
+            twice.
           </p>
         </article>
 
         <article className="card">
-          <h2>Students per grade</h2>
-          <BarList items={perGrade} />
-        </article>
-
-        <article className="card">
-          <h2>Professors by class size</h2>
-          <BarList items={teachersByClass} />
+          <h2>Students per class</h2>
+          <BarList items={perClass} />
         </article>
 
         <article className="card">

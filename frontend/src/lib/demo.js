@@ -8,9 +8,35 @@ import { todayStamp } from './attendance.js'
 const KEY = 'smartattendance.demo.v1'
 
 const SEED_STUDENTS = [
-  { fingerprint_id: 1, first_name: 'Amara', last_name: 'Okafor', grade_level: '1st Year', parent_email: 'parent.amara@example.com' },
-  { fingerprint_id: 2, first_name: 'Daniel', last_name: 'Reyes', grade_level: '2nd Year', parent_email: 'parent.daniel@example.com' },
-  { fingerprint_id: 3, first_name: 'Mei', last_name: 'Tan', grade_level: '1st Year', parent_email: 'parent.mei@example.com' },
+  {
+    fingerprint_id: 1,
+    student_number: '2026-0148',
+    first_name: 'Amara',
+    last_name: 'Okafor',
+    grade_level: '1st Year',
+    section: 'A',
+    parent_email: 'parent.amara@example.com',
+    teacher_id: 'staff-teacher',
+  },
+  {
+    fingerprint_id: 2,
+    student_number: '2026-0149',
+    first_name: 'Daniel',
+    last_name: 'Reyes',
+    grade_level: '2nd Year',
+    section: 'A',
+    parent_email: 'parent.daniel@example.com',
+    teacher_id: 'staff-teacher',
+  },
+  {
+    fingerprint_id: 3,
+    first_name: 'Mei',
+    last_name: 'Tan',
+    grade_level: '1st Year',
+    section: 'B',
+    parent_email: 'parent.mei@example.com',
+    teacher_id: null,
+  },
 ]
 
 function createStore() {
@@ -35,11 +61,12 @@ function createStore() {
       const parsed = JSON.parse(localStorage.getItem(KEY) || 'null')
       if (parsed?.students) {
         parsed.staff = parsed.staff ?? []
-        parsed.staff = parsed.staff.map((row) =>
-          row.grade_level === undefined
-            ? { ...row, grade_level: row.grade_levels?.[0] ?? null }
-            : row,
-        )
+        parsed.staff = parsed.staff.map((row) => ({
+          ...row,
+          grade_level: row.grade_level ?? row.grade_levels?.[0] ?? null,
+          grades: row.grades ?? (row.grade_level ? [row.grade_level] : []),
+          sections: row.sections ?? [],
+        }))
         parsed.nextStaffId = parsed.nextStaffId ?? 1
         parsed.grade_settings = parsed.grade_settings ?? []
         parsed.marks = parsed.marks ?? []
@@ -91,6 +118,8 @@ function createStore() {
         full_name: 'Demo Admin',
         role: 'admin',
         grade_level: null,
+        grades: [],
+        sections: [],
         status: 'active',
         temp_password: null,
         max_session_hours: 8,
@@ -100,7 +129,10 @@ function createStore() {
         email: 'teacher@school.example',
         full_name: 'Demo Teacher',
         role: 'teacher',
+        // Two grades and two sections, so both lists are visible in the demo.
         grade_level: '1st Year',
+        grades: ['1st Year', '2nd Year'],
+        sections: ['A', 'B'],
         status: 'active',
         temp_password: null,
         max_session_hours: 8,
@@ -116,6 +148,10 @@ function createStore() {
     async addStudent(input) {
       if (state.students.some((s) => s.fingerprint_id === input.fingerprint_id)) {
         throw new Error(`Fingerprint ID ${input.fingerprint_id} is already assigned.`)
+      }
+      const number = (input.student_number ?? '').trim()
+      if (number && state.students.some((s) => (s.student_number ?? '').trim() === number)) {
+        throw new Error(`Student ID ${number} is already taken.`)
       }
       const student = {
         id: `demo-${crypto.randomUUID()}`,
@@ -133,6 +169,10 @@ function createStore() {
         )
       ) {
         throw new Error(`Fingerprint ID ${changes.fingerprint_id} is already assigned.`)
+      }
+      const number = (changes.student_number ?? '').trim()
+      if (number && state.students.some((s) => s.id !== id && (s.student_number ?? '').trim() === number)) {
+        throw new Error(`Student ID ${number} is already taken.`)
       }
       state.students = state.students.map((student) =>
         student.id === id ? { ...student, ...changes } : student,
@@ -159,9 +199,7 @@ function createStore() {
     async kioskPulse(sinceIso) {
       const today = state.logs.filter((log) => log.scan_time >= sinceIso)
       const newest = [...today].sort((a, b) => b.scan_time.localeCompare(a.scan_time))[0] ?? null
-      const student = newest
-        ? state.students.find((row) => row.id === newest.student_id) ?? null
-        : null
+      const student = newest ? (state.students.find((row) => row.id === newest.student_id) ?? null) : null
       return {
         log_id: newest?.id ?? null,
         first_name: student?.first_name ?? null,
@@ -226,9 +264,7 @@ function createStore() {
         state.students.filter((student) => student.grade_level === grade).map((student) => student.id),
       )
       const before = state.logs.length
-      state.logs = state.logs.filter(
-        (log) => !(inGrade.has(log.student_id) && log.scan_time >= sinceIso),
-      )
+      state.logs = state.logs.filter((log) => !(inGrade.has(log.student_id) && log.scan_time >= sinceIso))
       save()
       return before - state.logs.length
     },
@@ -241,12 +277,7 @@ function createStore() {
       const rule = state.grade_settings.find((row) => row.grade_level === student.grade_level)
       const [startHour, startMinute] = (rule?.school_start ?? '08:00').split(':')
       const lateCutoff = new Date(now)
-      lateCutoff.setHours(
-        Number(startHour),
-        Number(startMinute) + (rule?.late_grace_minutes ?? 15),
-        0,
-        0,
-      )
+      lateCutoff.setHours(Number(startHour), Number(startMinute) + (rule?.late_grace_minutes ?? 15), 0, 0)
       const log = {
         id: `log-${state.nextLogId++}`,
         student_id: student.id,
@@ -297,14 +328,13 @@ function createStore() {
       save()
     },
     async timeIn() {
-      const me = state.staff.find((row) => row.role === demoRole())
-        ?? state.staff.find((row) => row.role === 'admin')
-        ?? state.staff[0]
+      const me =
+        state.staff.find((row) => row.role === demoRole()) ??
+        state.staff.find((row) => row.role === 'admin') ??
+        state.staff[0]
       if (!me) throw new Error('No staff profile found in demo mode.')
       const today = todayStamp()
-      const existing = state.timeLogs?.find(
-        (log) => log.staff_id === me.id && log.work_date === today,
-      )
+      const existing = state.timeLogs?.find((log) => log.staff_id === me.id && log.work_date === today)
       if (existing) return existing
       const row = {
         id: `time-${crypto.randomUUID()}`,
@@ -321,9 +351,10 @@ function createStore() {
       return row
     },
     async timeOut() {
-      const me = state.staff.find((row) => row.role === demoRole())
-        ?? state.staff.find((row) => row.role === 'admin')
-        ?? state.staff[0]
+      const me =
+        state.staff.find((row) => row.role === demoRole()) ??
+        state.staff.find((row) => row.role === 'admin') ??
+        state.staff[0]
       if (!me) throw new Error('No staff profile found in demo mode.')
       const today = todayStamp()
       const row = state.timeLogs?.find(
@@ -336,14 +367,13 @@ function createStore() {
       return row
     },
     async getMyTimeStatus() {
-      const me = state.staff.find((row) => row.role === demoRole())
-        ?? state.staff.find((row) => row.role === 'admin')
-        ?? state.staff[0]
+      const me =
+        state.staff.find((row) => row.role === demoRole()) ??
+        state.staff.find((row) => row.role === 'admin') ??
+        state.staff[0]
       if (!me) return null
       const today = todayStamp()
-      return (
-        state.timeLogs?.find((log) => log.staff_id === me.id && log.work_date === today) ?? null
-      )
+      return state.timeLogs?.find((log) => log.staff_id === me.id && log.work_date === today) ?? null
     },
     async setMaxSessionHours(staffId, hours) {
       const row = state.staff.find((s) => s.id === staffId)
@@ -353,9 +383,9 @@ function createStore() {
       save()
       return row
     },
-    /** Stands in for the sensor: honours a requested slot, else the next free one. */
-    startCapture(requestedSlot) {
-      let slot = Number(requestedSlot) || 0
+    /** Stands in for the USB scanner: three presses of one finger, then a merge. */
+    startCapture(requestedId) {
+      let slot = Number(requestedId) || 0
       if (!slot) {
         const taken = new Set(state.students.map((student) => student.fingerprint_id))
         slot = 1
@@ -364,22 +394,19 @@ function createStore() {
       const capture = { id: crypto.randomUUID(), status: 'capturing', fingerprint_id: null, step: 'place_1' }
       captures.set(capture.id, capture)
       setTimeout(() => {
-        capture.step = 'seen_1'
-      }, 1200)
-      setTimeout(() => {
-        capture.step = 'lift'
-      }, 2200)
-      setTimeout(() => {
         capture.step = 'place_2'
-      }, 3400)
+      }, 1600)
       setTimeout(() => {
-        capture.step = 'seen_2'
-      }, 4400)
+        capture.step = 'place_3'
+      }, 3200)
+      setTimeout(() => {
+        capture.step = 'merge'
+      }, 4600)
       setTimeout(() => {
         capture.status = 'done'
         capture.fingerprint_id = slot
         capture.step = null
-      }, 5200)
+      }, 5400)
       return capture
     },
     getCapture(id) {

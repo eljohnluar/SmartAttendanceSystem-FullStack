@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { api } from '../../lib/api.js'
+import { GradeFields } from '../../components/GradeFields.jsx'
+import { SectionFields, cleanSections, knownSections } from '../../components/SectionFields.jsx'
+import { cleanGrades } from '../../lib/grades.js'
 import { useApp } from '../../lib/useApp.js'
 
-const GRADES = ['1st Year', '2nd Year', '3rd Year', '4th Year']
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // Same alphabet the Python service uses: no 0/O or 1/l/I, so a password
 // survives being read to someone over the phone.
@@ -13,10 +15,10 @@ function generatePassword() {
   return [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('')
 }
 
-const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grade_level: '', temp_password: generatePassword(), max_session_hours: 8 })
+const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grades: [], sections: [], temp_password: generatePassword(), max_session_hours: 8 })
 
 export default function AddStaff() {
-  const { refreshStaff, mode } = useApp()
+  const { refreshStaff, mode, students } = useApp()
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(null)
@@ -28,13 +30,27 @@ export default function AddStaff() {
     setError('')
   }
 
+  const setList = (field) => (values) => {
+    setForm((previous) => ({ ...previous, [field]: values }))
+    setSaved(null)
+    setError('')
+  }
+
+  // Grades and sections already in the roster, so a name typed once becomes a
+  // pick from then on.
+  const gradesInUse = [...new Set(students.map((student) => student.grade_level).filter(Boolean))].sort()
+  const sectionsInUse = knownSections(students, form.grades[0])
+
   async function submit(event) {
     event.preventDefault()
     const email = form.email.trim().toLowerCase()
+    const isTeacher = form.role === 'teacher'
+    const grades = isTeacher ? cleanGrades(form.grades) : []
+    const sections = isTeacher ? cleanSections(form.sections) : []
 
     if (!form.full_name.trim()) return setError('Enter the staff member’s name.')
     if (!EMAIL_PATTERN.test(email)) return setError('Enter a valid email address.')
-    if (form.role === 'teacher' && !form.grade_level) return setError('Professors are scoped to one grade.')
+    if (isTeacher && grades.length === 0) return setError('Choose at least one grade for a professor.')
     const password = form.temp_password.trim()
     if (password && password.length < 8) {
       return setError('Use at least 8 characters, or leave it blank to auto-generate.')
@@ -46,7 +62,9 @@ export default function AddStaff() {
         full_name: form.full_name.trim(),
         email,
         role: form.role,
-        grade_level: form.role === 'teacher' ? form.grade_level : null,
+        grades,
+        grade_level: grades[0] ?? null,
+        sections,
         temp_password: password || null,
         max_session_hours: form.max_session_hours,
       })
@@ -86,26 +104,46 @@ export default function AddStaff() {
           <div className="field">
             <label htmlFor="role">Role</label>
             <select id="role" value={form.role} onChange={update('role')}>
-              <option value="teacher">Professor — one grade, read and enroll</option>
+              <option value="teacher">Professor — their grades only, read and enroll</option>
               <option value="admin">Admin — whole school, can manage staff</option>
             </select>
           </div>
 
           <div className="field">
-            <label htmlFor="grade_level">Grade</label>
-            <select
-              id="grade_level"
-              value={form.grade_level}
-              onChange={update('grade_level')}
+            <label htmlFor="grades">Grades</label>
+            <GradeFields
+              grades={form.grades}
+              options={gradesInUse}
+              onChange={setList('grades')}
               disabled={form.role === 'admin'}
-            >
-              <option value="">{form.role === 'admin' ? 'Not needed for admins' : 'Choose a grade'}</option>
-              {GRADES.map((grade) => (
-                <option key={grade} value={grade}>
-                  {grade}
-                </option>
+              nameFor={(number) => `Grade ${number} for ${form.full_name || 'this professor'}`}
+            />
+            <span className="hint">
+              {form.role === 'admin'
+                ? 'Admins reach every grade.'
+                : 'Use + to teach another grade.'}
+            </span>
+          </div>
+
+          <div className="field">
+            <label htmlFor="sections">Sections</label>
+            <SectionFields
+              sections={form.sections}
+              onChange={setList('sections')}
+              disabled={form.role === 'admin'}
+              listId="staff-section-options"
+              nameFor={(number) => `Section ${number} for ${form.full_name || 'this professor'}`}
+            />
+            <datalist id="staff-section-options">
+              {sectionsInUse.map((section) => (
+                <option key={section} value={section} />
               ))}
-            </select>
+            </datalist>
+            <span className="hint">
+              {form.role === 'admin'
+                ? 'Admins reach every section.'
+                : 'Leave empty for every section, or list the ones they teach. Use + for another.'}
+            </span>
           </div>
 
           <div className="field">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, mode } from './lib/api.js'
 import { demoRole } from './lib/demo.js'
 import { getCurrentUser, signOut as endSession, watchAuth } from './lib/auth.js'
+import { gradesOf } from './lib/grades.js'
 import { AppContext } from './lib/useApp.js'
 
 const HEARTBEAT_STALE_SECONDS = 20
@@ -15,7 +16,7 @@ function describeBackend(status) {
     const fresh = Date.now() - beat < HEARTBEAT_STALE_SECONDS * 1000
     return {
       state: fresh ? 'online' : 'stale',
-      label: fresh ? 'Arduino connected' : 'Backend silent',
+      label: fresh ? 'Scanner connected' : 'Scanner silent',
       detail: status.message || status.port || '',
     }
   }
@@ -117,6 +118,16 @@ export function AppProvider({ children }) {
     window.location.hash = '#/kiosk'
   }, [])
 
+  // The grades the signed-in staff member teaches, and the one they are working
+  // in right now. A professor with several needs one at a time on screen,
+  // because enrolling a student into the wrong grade is easy to do and awkward
+  // to undo.
+  const grades = useMemo(() => gradesOf(staff), [staff])
+  const [activeGrade, setActiveGrade] = useState(null)
+  useEffect(() => {
+    setActiveGrade((current) => (grades.includes(current) ? current : grades[0] ?? null))
+  }, [grades])
+
   // Auto-start the countdown when a staff member signs in
   useEffect(() => {
     if (staff?.status === 'active' && timeRemaining === null) {
@@ -176,6 +187,9 @@ export function AppProvider({ children }) {
       loadError,
       user,
       staff,
+      grades,
+      activeGrade,
+      setActiveGrade,
       team,
       access,
       registrationOpen,
@@ -186,7 +200,7 @@ export function AppProvider({ children }) {
       setMaxSessionHours,
       simulateScan: api.simulateScan,
     }),
-    [students, logs, marks, backend, loadError, user, staff, team, access, registrationOpen, timeRemaining, refresh, refreshStaff, signOut, setMaxSessionHours],
+    [students, logs, marks, backend, loadError, user, staff, grades, activeGrade, team, access, registrationOpen, timeRemaining, refresh, refreshStaff, signOut, setMaxSessionHours],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

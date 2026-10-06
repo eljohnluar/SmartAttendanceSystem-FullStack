@@ -31,8 +31,8 @@ function TimeCard() {
     <article className="card time-card">
       <h2>Allotted session time</h2>
       <p className="muted" style={{ marginBottom: '16px' }}>
-        Set the maximum number of hours you can stay logged in. When the time is up, you will be
-        logged out automatically.
+        Set the maximum number of hours you can stay logged in. When the time is up, you will be logged out
+        automatically.
       </p>
       <div className="hours-row">
         <div className="field" style={{ flex: '0 1 140px' }}>
@@ -51,8 +51,16 @@ function TimeCard() {
           {hoursSaved ? 'Saved' : 'Save'}
         </button>
       </div>
-      {hoursError && <p className="alert alert-error" style={{ marginTop: '12px' }}>{hoursError}</p>}
-      {hoursSaved && <p className="alert alert-ok" style={{ marginTop: '12px' }}>Allotted time updated.</p>}
+      {hoursError && (
+        <p className="alert alert-error" style={{ marginTop: '12px' }}>
+          {hoursError}
+        </p>
+      )}
+      {hoursSaved && (
+        <p className="alert alert-ok" style={{ marginTop: '12px' }}>
+          Allotted time updated.
+        </p>
+      )}
     </article>
   )
 }
@@ -62,7 +70,11 @@ const SUGGESTED_GRACE = 15
 
 function matches(needle, ...haystacks) {
   // fingerprint_id arrives as a number, which has no toLowerCase of its own.
-  return haystacks.some((text) => String(text ?? '').toLowerCase().includes(needle))
+  return haystacks.some((text) =>
+    String(text ?? '')
+      .toLowerCase()
+      .includes(needle),
+  )
 }
 
 function cutoffOf(start, minutes) {
@@ -153,7 +165,9 @@ function LateRule({ students, logs }) {
     try {
       const cleared = await api.resetAttendance(grade)
       setNote(
-        cleared ? `Cleared ${cleared} scan${cleared === 1 ? '' : 's'} for ${grade}. They can scan again.` : `Nothing to clear for ${grade} today.`,
+        cleared
+          ? `Cleared ${cleared} scan${cleared === 1 ? '' : 's'} for ${grade}. They can scan again.`
+          : `Nothing to clear for ${grade} today.`,
       )
       await refresh()
     } catch (resetError) {
@@ -255,7 +269,7 @@ function LateRule({ students, logs }) {
 }
 
 export default function Dashboard() {
-  const { students, logs, marks, backend, access, staff, refresh } = useApp()
+  const { students, logs, marks, backend, access, staff, grades, refresh } = useApp()
   const [query, setQuery] = useState('')
   const needle = query.trim().toLowerCase()
 
@@ -293,14 +307,16 @@ export default function Dashboard() {
       if (status) {
         await api.saveMark(student.id, status)
         if (student.parent_email) {
-          api.notifyParent?.({
-            student,
-            status,
-            scanTime: new Date().toISOString(),
-            markedBy: staff?.full_name ?? '',
-          }).catch((notifyErr) => {
-            console.warn('[email] Could not notify parent via Brevo:', notifyErr.message)
-          })
+          api
+            .notifyParent?.({
+              student,
+              status,
+              scanTime: new Date().toISOString(),
+              markedBy: staff?.full_name ?? '',
+            })
+            .catch((notifyErr) => {
+              console.warn('[email] Could not notify parent via Brevo:', notifyErr.message)
+            })
         }
       } else {
         await api.clearMark(student.id)
@@ -319,8 +335,16 @@ export default function Dashboard() {
           <p className="page-sub">{formatDateLong()}</p>
         </div>
         <div className="head-side">
-          {access === 'teacher' && <span className="pill pill-demo">{staff?.grade_level} only</span>}
+          {access === 'teacher' && grades.length > 0 && (
+            <span className="pill pill-demo">
+              {grades.join(', ')}
+              {staff?.sections?.length ? ` · ${staff.sections.join(', ')}` : ''} only
+            </span>
+          )}
           <StatusPill backend={backend} />
+          <button type="button" className="btn btn-quiet" onClick={() => window.print()}>
+            Print
+          </button>
         </div>
       </header>
 
@@ -352,7 +376,15 @@ export default function Dashboard() {
       <LateRule students={students} logs={logs} />
 
       <label className="search">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          aria-hidden="true"
+        >
           <circle cx="11" cy="11" r="6.5" />
           <path d="m16 16 4 4" strokeLinecap="round" />
         </svg>
@@ -363,17 +395,24 @@ export default function Dashboard() {
           aria-label="Search"
         />
         {query && (
-          <button type="button" className="search-clear" onClick={() => setQuery('')} aria-label="Clear search">
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+          >
             ×
           </button>
         )}
       </label>
 
-      <div className="panels">
+      <div className="panels panels-stacked">
         <article className="card">
           <h2>Today’s log</h2>
           {visibleLogs.length === 0 ? (
-            <p className="muted">{logs.length === 0 ? 'No scans recorded yet today.' : 'No results for that search.'}</p>
+            <p className="muted">
+              {logs.length === 0 ? 'No scans recorded yet today.' : 'No results for that search.'}
+            </p>
           ) : (
             <table>
               <thead>
@@ -445,18 +484,19 @@ export default function Dashboard() {
                       <td>{student.grade_level}</td>
                       <td className="muted">{student.parent_email}</td>
                       <td>
-                        <select
-                          value={mark?.status ?? ''}
-                          onChange={(event) => setMark(student, event.target.value)}
-                          aria-label={`Today's status for ${fullName(student)}`}
-                        >
-                          <option value="">
-                            {scan ? `By scan — ${scan.status}` : 'No scan yet'}
-                          </option>
-                          <option value="Present">Mark present</option>
-                          <option value="Late">Mark late</option>
-                          <option value="Absent">Mark absent</option>
-                        </select>
+                        <span className="screen-only">
+                          <select
+                            value={mark?.status ?? ''}
+                            onChange={(event) => setMark(student, event.target.value)}
+                            aria-label={`Today's status for ${fullName(student)}`}
+                          >
+                            <option value="">{scan ? `By scan — ${scan.status}` : 'No scan yet'}</option>
+                            <option value="Present">Mark present</option>
+                            <option value="Late">Mark late</option>
+                            <option value="Absent">Mark absent</option>
+                          </select>
+                        </span>
+                        <span className="print-only">{mark?.status ?? scan?.status ?? 'Absent'}</span>
                       </td>
                     </tr>
                   )

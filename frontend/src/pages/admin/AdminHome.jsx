@@ -105,7 +105,7 @@ export default function AdminHome() {
           {grades.length === 0 ? (
             <p className="muted">
               Nothing to report yet. Add students from{' '}
-              <a href="#/teachers">Professor Management</a>.
+              <a href="#/roster">Student Management</a>.
             </p>
           ) : (
             <table>

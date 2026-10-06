@@ -473,6 +473,13 @@ code {
   gap: 24px;
 }
 
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
 .page-head h1 {
   font-size: 30px;
 }
@@ -734,6 +741,78 @@ select:disabled {
   padding: 0 18px;
 }
 
+/* A professor's sections: one field per row, with small square add/remove keys. */
+.section-fields,
+.grade-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.section-row,
+.grade-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.section-row input,
+.grade-row select {
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
+  padding: 9px 11px;
+}
+
+.staff-scope {
+  display: grid;
+  gap: 8px;
+}
+
+/* Narrowing the roster to one grade, and one section inside it. */
+.roster-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.roster-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.roster-filter select {
+  padding: 8px 10px;
+}
+
+.btn-icon {
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.btn-icon:hover {
+  border-color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.btn-icon-add {
+  justify-self: start;
+}
+
 .form-actions {
   grid-column: 1 / -1;
   display: flex;
@@ -747,7 +826,10 @@ select:disabled {
   padding: 11px 20px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .btn-primary {
@@ -1183,11 +1265,69 @@ select:disabled {
   cursor: pointer;
 }
 
+.roster-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 26px;
+}
+
+.roster-tools .search {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.roster-count {
+  color: var(--ink-faint);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* The signed-in staff member's own record. */
+.profile-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.profile-list > div {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  align-items: baseline;
+}
+
+.profile-list dt {
+  color: var(--ink-faint);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.profile-list dd {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 560px) {
+  .profile-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .panels {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+}
+
+/* Two tables side by side gives each one too few columns of room. */
+.panels-stacked {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 table {
@@ -1859,4 +1999,70 @@ td select {
   border: 1px solid var(--line);
   color: var(--ink);
   flex: none;
+}
+
+/* ── Printing a roster or a day's attendance ───────────────────────── */
+.print-head {
+  display: none;
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  .topbar,
+  .sidebar,
+  .page-head-actions,
+  .head-side,
+  .roster-filters,
+  .roster-tools,
+  .search,
+  .time-card,
+  .rule-card,
+  .row-actions,
+  .alert,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  .screen-only {
+    display: none !important;
+  }
+
+  .print-only {
+    display: inline;
+  }
+
+  thead th:empty {
+    display: none;
+  }
+
+  .print-head {
+    display: block;
+    margin-bottom: 14px;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+
+  .card {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .page-head {
+    margin-bottom: 18px;
+  }
+
+  table {
+    font-size: 12px;
+  }
 }

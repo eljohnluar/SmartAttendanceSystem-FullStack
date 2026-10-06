@@ -17,23 +17,27 @@ export function startOfToday() {
   return now.toISOString()
 }
 
+function duplicateStudentMessage(error, row) {
+  // students_student_number_key is the partial unique index on the school ID, so
+  // a clash there must not be reported as a Fingerprint ID clash.
+  const text = `${error.message ?? ''} ${error.details ?? ''}`
+  if (/student_number/.test(text)) {
+    return `Student ID ${row.student_number} is already taken.`
+  }
+  return `Fingerprint ID ${row.fingerprint_id} is already assigned.`
+}
+
 export const api = {
   async listStudents() {
     if (!isLive) return demo.listStudents()
-    return unwrap(
-      supabase.from('students').select('*').order('fingerprint_id', { ascending: true }),
-    )
+    return unwrap(supabase.from('students').select('*').order('fingerprint_id', { ascending: true }))
   },
 
   async addStudent(input) {
     if (!isLive) return demo.addStudent(input)
     const { data, error } = await supabase.from('students').insert(input).select().single()
     if (error) {
-      throw new Error(
-        error.code === '23505'
-          ? `Fingerprint ID ${input.fingerprint_id} is already assigned.`
-          : error.message,
-      )
+      throw new Error(error.code === '23505' ? duplicateStudentMessage(error, input) : error.message)
     }
     return data
   },
@@ -42,11 +46,7 @@ export const api = {
     if (!isLive) return demo.updateStudent(id, changes)
     const { error } = await supabase.from('students').update(changes).eq('id', id)
     if (error) {
-      throw new Error(
-        error.code === '23505'
-          ? `Fingerprint ID ${changes.fingerprint_id} is already assigned.`
-          : error.message,
-      )
+      throw new Error(error.code === '23505' ? duplicateStudentMessage(error, changes) : error.message)
     }
   },
 
@@ -127,7 +127,12 @@ export const api = {
   async markAttendance(studentId, status) {
     if (!isLive) {
       // Demo shim: insert a synthetic log row
-      return demo.insertAttendance?.({ student_id: studentId, status, scan_time: new Date().toISOString(), parent_notified: false })
+      return demo.insertAttendance?.({
+        student_id: studentId,
+        status,
+        scan_time: new Date().toISOString(),
+        parent_notified: false,
+      })
     }
     const { data, error } = await supabase
       .from('attendance_logs')
@@ -154,7 +159,9 @@ export const api = {
       console.log('[demo] notifyParent skipped in demo mode')
       return { sent: false }
     }
-    const { data: { session } } = await supabase.auth.getSession()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
     const token = session?.access_token
     const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/notify-parent`
     const resp = await fetch(fnUrl, {
@@ -226,11 +233,7 @@ export const api = {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) return null
-    const { data } = await supabase
-      .from('staff_profiles')
-      .select('*')
-      .eq('auth_id', user.id)
-      .maybeSingle()
+    const { data } = await supabase.from('staff_profiles').select('*').eq('auth_id', user.id).maybeSingle()
     return data
   },
 
@@ -242,11 +245,7 @@ export const api = {
       .select()
       .single()
     if (error) {
-      throw new Error(
-        error.code === '23505'
-          ? `${input.email} is already on the staff list.`
-          : error.message,
-      )
+      throw new Error(error.code === '23505' ? `${input.email} is already on the staff list.` : error.message)
     }
     return data
   },
@@ -308,7 +307,13 @@ export const api = {
 
   /** Claims an admin row for the account that just registered. */
   async claimAdminProfile(fullName) {
-    if (!isLive) return demo.addStaff({ full_name: fullName, email: 'admin@school.example', role: 'admin', grade_level: null })
+    if (!isLive)
+      return demo.addStaff({
+        full_name: fullName,
+        email: 'admin@school.example',
+        role: 'admin',
+        grade_level: null,
+      })
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -330,7 +335,7 @@ export const api = {
     }
   },
 
-  /** Queues a sensor capture; the Python service performs it and fills in the slot. */
+  /** Queues a capture; the scanner program takes the three prints and saves the result on the student. */
   async startCapture(fingerprintId) {
     if (!isLive) return demo.startCapture(fingerprintId)
     const { data, error } = await supabase
@@ -348,7 +353,7 @@ export const api = {
     return data
   },
 
-  /** Queues removal of a stale template (after a transfer); the Python service clears it on the sensor. */
+  /** Queues removal of a stale print (after a transfer); the scanner program drops it. */
   async queueClear(fingerprintId) {
     if (!isLive) return demo.queueClear(fingerprintId)
     const { data, error } = await supabase
@@ -377,11 +382,7 @@ export const api = {
     if (!isLive) return () => {}
     const channel = supabase
       .channel('capture-feed')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'fingerprint_captures' },
-        onChange,
-      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'fingerprint_captures' }, onChange)
       .subscribe()
     return () => supabase.removeChannel(channel)
   },
@@ -405,9 +406,9 @@ export const api = {
     return () => supabase.removeChannel(channel)
   },
 
-  /** Demo-only: pretends the Arduino reported a fingerprint. */
+  /** Demo-only: pretends the scanner reported a fingerprint. */
   async simulateScan(fingerprintId) {
-    if (isLive) throw new Error('Scans come from the Arduino in live mode.')
+    if (isLive) throw new Error('Scans come from the fingerprint scanner in live mode.')
     return demo.simulateScan(fingerprintId)
   },
 }
