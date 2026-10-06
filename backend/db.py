@@ -61,6 +61,34 @@ class SupabaseStore:
             "GET", "students", params={"select": "*", "order": "fingerprint_id.asc"}
         ).json()
 
+    def roster(self) -> list[dict]:
+        """The few columns the scanner needs to rebuild its memory."""
+        return self._request(
+            "GET",
+            "students",
+            params={
+                "select": "id,fingerprint_id,first_name,last_name,fingerprint_template",
+                "order": "fingerprint_id.asc",
+            },
+        ).json()
+
+    def save_template(self, fingerprint_id: int, template_b64: str) -> int:
+        """Stores an enrolled print on the student row. Returns how many rows moved."""
+        return self._patched_count(
+            "students", {"fingerprint_id": f"eq.{int(fingerprint_id)}"}, {"fingerprint_template": template_b64}
+        )
+
+    def clear_template(self, fingerprint_id: int) -> int:
+        return self._patched_count(
+            "students", {"fingerprint_id": f"eq.{int(fingerprint_id)}"}, {"fingerprint_template": None}
+        )
+
+    def _patched_count(self, table: str, filters: dict, changes: dict) -> int:
+        response = self._request(
+            "PATCH", table, params=filters, json=changes, headers={"Prefer": "return=representation"}
+        )
+        return len(response.json() or [])
+
     def insert_student(self, student: dict) -> dict:
         rows = self._request(
             "POST",
@@ -206,6 +234,25 @@ class LocalStore:
 
     def list_students(self) -> list[dict]:
         return sorted(self._data["students"], key=lambda s: s["fingerprint_id"])
+
+    def roster(self) -> list[dict]:
+        return self.list_students()
+
+    def save_template(self, fingerprint_id: int, template_b64: str) -> int:
+        return self._set_template(fingerprint_id, template_b64)
+
+    def clear_template(self, fingerprint_id: int) -> int:
+        return self._set_template(fingerprint_id, None)
+
+    def _set_template(self, fingerprint_id: int, template_b64: str | None) -> int:
+        changed = 0
+        for row in self._data["students"]:
+            if row["fingerprint_id"] == int(fingerprint_id):
+                row["fingerprint_template"] = template_b64
+                changed += 1
+        if changed:
+            self._save()
+        return changed
 
     def insert_student(self, student: dict) -> dict:
         row = {

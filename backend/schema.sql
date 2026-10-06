@@ -8,12 +8,41 @@ create extension if not exists "pgcrypto";
 create table if not exists public.students (
   id              uuid primary key default gen_random_uuid(),
   fingerprint_id  integer not null unique,
+  student_number  text,
   first_name      text not null,
   last_name       text not null,
   grade_level     text not null,
+  section         text,
   parent_email    text not null,
+  fingerprint_template text,
   created_at      timestamptz not null default now()
 );
+
+-- The school's own identifier for the child — the number on its forms and ID
+-- card. Optional, because enrollment can happen before the office issues one.
+alter table public.students
+  add column if not exists student_number text;
+
+comment on column public.students.student_number is
+  'School student ID as typed by the admin. Unique when present; the uuid id and the fingerprint_id are separate.';
+
+-- A partial index keeps it unique without forcing everyone to have one: Postgres
+-- lets any number of rows leave it null.
+create unique index if not exists students_student_number_key
+  on public.students (student_number)
+  where student_number is not null;
+
+-- The class a student belongs to inside their grade, e.g. "A" or "Blue".
+alter table public.students
+  add column if not exists section text;
+
+-- The Live20R has no memory of its own. This is the merged template, held as
+-- base64 text, that the backend loads back into the scanner on every start.
+alter table public.students
+  add column if not exists fingerprint_template text;
+
+comment on column public.students.fingerprint_template is
+  'Base64 ZKFinger template. A mathematical description of the print, not an image.';
 
 -- ── Table 2: attendance_logs ─────────────────────────────────────────
 create table if not exists public.attendance_logs (
@@ -51,6 +80,8 @@ create table if not exists public.staff_profiles (
   full_name      text not null,
   role           text not null check (role in ('admin', 'teacher')),
   grade_level    text,
+  grades         text[] not null default '{}',
+  sections       text[] not null default '{}',
   status         text not null default 'pending'
                  check (status in ('pending', 'active', 'failed')),
   temp_password  text,
@@ -67,8 +98,8 @@ alter table public.staff_profiles
   add column if not exists max_session_hours numeric(4,1) not null default 8.0
   check (max_session_hours > 0 and max_session_hours <= 24);
 
--- One teacher, one grade: the short-lived multi-grade switcher is gone. Rows
--- that already got a grade_levels array keep their first grade.
+-- Folds the old grade_levels array experiment into grade_level for any database
+-- that still has it. The current multi-grade column is grades, added below.
 do $$
 begin
   if exists (
@@ -93,9 +124,31 @@ begin
 end
 $$;
 
+-- A professor may teach several grades. grades is the list that scopes their
+-- login; grade_level always names the first of them, so every single-grade
+-- reader — the teacher pages, the kiosk pulse, the daily reset — keeps working.
+-- An empty list falls back to grade_level, which covers rows written before the
+-- array existed.
+alter table public.staff_profiles
+  add column if not exists grades text[] not null default '{}';
+
+update public.staff_profiles
+  set grades = array[grade_level]
+  where grade_level is not null and cardinality(grades) = 0;
+
+update public.staff_profiles
+  set grade_level = grades[1]
+  where cardinality(grades) > 0 and grade_level is distinct from grades[1];
+
+-- A professor may be narrowed to particular sections of their grades. An empty
+-- list means every section, which is how every row predating this column
+-- already behaved.
+alter table public.staff_profiles
+  add column if not exists sections text[] not null default '{}';
+
 alter table public.staff_profiles drop constraint if exists staff_grades_for_teachers;
 
--- Teachers are scoped to exactly one grade; admins may leave it null.
+-- Teachers name at least one grade; admins may leave both columns empty.
 do $$
 begin
   if not exists (
@@ -108,10 +161,23 @@ begin
 end
 $$;
 
+-- The professor a student is assigned to, for the roster's "choose teacher"
+-- picker. It is a label the admin sets, not a permission: row-level security
+-- still scopes every read and write through owns(). Deleting the professor
+-- leaves the students standing with the assignment cleared.
+alter table public.students
+  add column if not exists teacher_id uuid;
+
+alter table public.students drop constraint if exists students_teacher_id_fkey;
+
+alter table public.students
+  add constraint students_teacher_id_fkey
+  foreign key (teacher_id) references public.staff_profiles(id) on delete set null;
+
 -- ── Table 5: fingerprint_captures ────────────────────────────────────
--- The browser cannot open the COM port, so "Enroll fingerprint" on the
--- student form queues a row here and the Python service performs the capture
--- on the sensor and writes the resulting memory slot back.
+-- The browser cannot touch the USB scanner, so "Enroll fingerprint" on the
+-- student form queues a row here and the Python service performs the three-scan
+-- capture and writes the resulting template onto the student's row.
 create table if not exists public.fingerprint_captures (
   id             uuid primary key default gen_random_uuid(),
   status         text not null default 'pending'
@@ -124,9 +190,9 @@ create table if not exists public.fingerprint_captures (
   updated_at     timestamptz not null default now()
 );
 
--- Live stage of an in-flight capture ('place_1' -> 'lift' -> 'place_2') so the
--- web form can tell the user when to lift their finger. Null before the first
--- stage arrives and once the capture settles.
+-- Live stage of an in-flight capture ('place_1' -> 'place_2' -> 'place_3' ->
+-- 'merge') so the web form can coach the student through the three presses.
+-- Null before the first stage arrives and once the capture settles.
 do $$
 begin
   if not exists (
@@ -140,8 +206,8 @@ begin
 end
 $$;
 
--- The same queue also carries "clear this slot" rows, so a transfer can drop
--- the stale template through the service that owns the COM port.
+-- The same queue also carries "clear this ID" rows, so a transfer can drop the
+-- stale print from both the scanner and the student's row.
 do $$
 begin
   if not exists (
@@ -228,11 +294,36 @@ $$
   where auth_id = auth.uid() and status = 'active';
 $$;
 
-create or replace function public.my_grade() returns text
+create or replace function public.my_grades() returns text[]
 language sql stable security definer set search_path = public as
 $$
-  select grade_level from public.staff_profiles
-  where auth_id = auth.uid() and status = 'active';
+  -- grades is the source of truth; grade_level covers rows written before the
+  -- array existed. Never null, so `= any(...)` denies cleanly instead of
+  -- turning the whole policy into null.
+  select coalesce(
+    (select case
+              when cardinality(sp.grades) > 0 then sp.grades
+              else array_remove(array[sp.grade_level], null)
+            end
+       from public.staff_profiles sp
+      where sp.auth_id = auth.uid() and sp.status = 'active'),
+    '{}'
+  );
+$$;
+
+-- The sections a professor is limited to, across whichever grades they teach.
+-- An empty list (or a login with no staff row) means every section.
+create or replace function public.my_sections() returns text[]
+language sql stable security definer set search_path = public as
+$$
+  -- Never null: a login with no staff row gets an empty list, which owns()
+  -- reads as "no grade at all" rather than as "every section".
+  select coalesce(
+    (select array_remove(sp.sections, null)
+       from public.staff_profiles sp
+      where sp.auth_id = auth.uid() and sp.status = 'active'),
+    '{}'
+  );
 $$;
 
 create or replace function public.is_admin() returns boolean
@@ -253,6 +344,24 @@ create or replace function public.student_grade(p_student_id uuid) returns text
 language sql stable security definer set search_path = public as
 $$
   select grade_level from public.students where id = p_student_id;
+$$;
+
+create or replace function public.student_section(p_student_id uuid) returns text
+language sql stable security definer set search_path = public as
+$$
+  select section from public.students where id = p_student_id;
+$$;
+
+-- Whether a staff member may reach a given student: one of their grades, and one
+-- of their sections when they have been narrowed to any. Reading a student
+-- through their log rows goes the same way, so a professor cannot see attendance
+-- for a section they do not teach.
+create or replace function public.owns(p_grade text, p_section text) returns boolean
+language sql stable security definer set search_path = public as
+$$
+  select p_grade = any(public.my_grades())
+    and (cardinality(public.my_sections()) = 0
+         or coalesce(p_section, '') = any (public.my_sections()));
 $$;
 
 -- True once any admin row exists, including one still waiting to be
@@ -283,8 +392,9 @@ revoke execute on function public.registration_open() from public;
 grant execute on function public.registration_open() to anon, authenticated;
 
 -- ── Row level security ───────────────────────────────────────────────
--- admin   : everything, including deleting students and managing staff
--- teacher : read and enroll students in their own grade only
+-- admin   : everything, including managing staff
+-- teacher : read, enroll, edit and delete students in their own grades and
+--           sections only
 -- anon    : the public kiosk may read the roster and the log
 -- The Python service uses the service-role key, which bypasses all of this.
 alter table public.students             enable row level security;
@@ -314,34 +424,38 @@ drop policy if exists "staff deletable"     on public.staff_profiles;
 create policy "students readable" on public.students
   for select using (
     public.is_public_kiosk() or public.is_admin()
-    or grade_level is not distinct from public.my_grade()
+    or public.owns(grade_level, section)
   );
 
 create policy "students creatable" on public.students
   for insert with check (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and grade_level is not distinct from public.my_grade())
+        and public.owns(grade_level, section))
   );
 
 create policy "students editable" on public.students
   for update using (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and grade_level is not distinct from public.my_grade())
+        and public.owns(grade_level, section))
   ) with check (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and grade_level is not distinct from public.my_grade())
+        and public.owns(grade_level, section))
   );
 
 create policy "students deletable" on public.students
-  for delete using (public.is_admin());
+  for delete using (
+    public.is_admin()
+    or (public.my_role() = 'teacher'
+        and public.owns(grade_level, section))
+  );
 
 create policy "logs readable" on public.attendance_logs
   for select using (
     public.is_public_kiosk() or public.is_admin()
-    or public.student_grade(student_id) is not distinct from public.my_grade()
+    or public.owns(public.student_grade(student_id), public.student_section(student_id))
   );
 
 create policy "status readable" on public.backend_status
@@ -389,23 +503,23 @@ drop policy if exists "grade settings editable" on public.grade_settings;
 
 create policy "grade settings readable" on public.grade_settings
   for select to authenticated using (
-    public.is_admin() or grade_level is not distinct from public.my_grade()
+    public.is_admin() or grade_level = any(public.my_grades())
   );
 
 create policy "grade settings creatable" on public.grade_settings
   for insert to authenticated with check (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and grade_level is not distinct from public.my_grade())
+        and grade_level = any(public.my_grades()))
   );
 
 create policy "grade settings editable" on public.grade_settings
   for update to authenticated using (
-    public.is_admin() or grade_level is not distinct from public.my_grade()
+    public.is_admin() or grade_level = any(public.my_grades())
   ) with check (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and grade_level is not distinct from public.my_grade())
+        and grade_level = any(public.my_grades()))
   );
 
 -- A teacher may override attendance for their own class only; the kiosk has
@@ -416,18 +530,18 @@ drop policy if exists "marks writable" on public.attendance_marks;
 create policy "marks readable" on public.attendance_marks
   for select to authenticated using (
     public.is_admin()
-    or public.student_grade(student_id) is not distinct from public.my_grade()
+    or public.owns(public.student_grade(student_id), public.student_section(student_id))
   );
 
 create policy "marks writable" on public.attendance_marks
   for all to authenticated using (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and public.student_grade(student_id) is not distinct from public.my_grade())
+        and public.owns(public.student_grade(student_id), public.student_section(student_id)))
   ) with check (
     public.is_admin()
     or (public.my_role() = 'teacher'
-        and public.student_grade(student_id) is not distinct from public.my_grade())
+        and public.owns(public.student_grade(student_id), public.student_section(student_id)))
   );
 
 -- ── Update a staff member's allotted session time ────────────────────
@@ -576,7 +690,7 @@ begin
   end if;
   if not public.is_admin()
      and not (public.my_role() = 'teacher'
-              and p_grade is not distinct from public.my_grade()) then
+              and p_grade = any(public.my_grades())) then
     raise exception 'You may only reset your own grade';
   end if;
 
@@ -715,7 +829,6 @@ begin
 end
 $$;
 
--- Every policy scopes through my_grade(); the multi-grade accessor from the
--- short-lived switcher experiment is gone. Dropped last so no stale policy
--- still depends on it.
-drop function if exists public.my_grades();
+-- Teachers scope through my_grades()/my_sections() via owns(). The single-grade
+-- accessor it replaces is dropped last, so no stale policy still depends on it.
+drop function if exists public.my_grade();

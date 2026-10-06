@@ -21,12 +21,18 @@ def _get_int(name: str, default: int) -> int:
     return int(raw) if raw.isdigit() else default
 
 
+def _get_choice(name: str, default: str, allowed: set[str]) -> str:
+    raw = _get(name, default).lower()
+    return raw if raw in allowed else default
+
+
 @dataclass(frozen=True)
 class Settings:
     supabase_url: str
     supabase_key: str
-    arduino_port: str
-    baud: int
+    scanner_index: int
+    match_threshold: int
+    scanner_mode: str
     gmail_address: str
     gmail_app_password: str
     smtp_host: str
@@ -38,6 +44,7 @@ class Settings:
     resend_api_key: str
     duplicate_scan_minutes: int
     heartbeat_seconds: int
+    resync_seconds: int
     from_override: str
 
     @property
@@ -49,8 +56,13 @@ class Settings:
         return bool(self.gmail_address and self.gmail_app_password)
 
     @property
-    def has_serial(self) -> bool:
-        return bool(self.arduino_port)
+    def simulate_scanner(self) -> bool:
+        return self.scanner_mode == "simulate"
+
+    @property
+    def allow_simulator_fallback(self) -> bool:
+        """'usb' demands the real device; 'auto' lets a missing one drop to keys."""
+        return self.scanner_mode == "auto"
 
     @property
     def sender_address(self) -> str:
@@ -61,8 +73,9 @@ def load_settings() -> Settings:
     return Settings(
         supabase_url=_get("SUPABASE_URL").rstrip("/"),
         supabase_key=_get("SUPABASE_SERVICE_ROLE_KEY"),
-        arduino_port=_get("ARDUINO_PORT"),
-        baud=_get_int("ARDUINO_BAUD", 57600),
+        scanner_index=_get_int("SCANNER_INDEX", 0),
+        match_threshold=_get_int("SCANNER_MATCH_THRESHOLD", 0),
+        scanner_mode=_get_choice("SCANNER_MODE", "auto", {"auto", "usb", "simulate"}),
         gmail_address=_get("GMAIL_ADDRESS"),
         gmail_app_password=_get("GMAIL_APP_PASSWORD").replace(" ", ""),
         smtp_host=_get("SMTP_HOST", "smtp.gmail.com"),
@@ -74,5 +87,6 @@ def load_settings() -> Settings:
         resend_api_key=_get("RESEND_API_KEY"),
         duplicate_scan_minutes=_get_int("DUPLICATE_SCAN_MINUTES", 45),
         heartbeat_seconds=_get_int("HEARTBEAT_SECONDS", 5),
+        resync_seconds=_get_int("TEMPLATE_RESYNC_SECONDS", 60),
         from_override=_get("EMAIL_FROM_OVERRIDE"),
     )
