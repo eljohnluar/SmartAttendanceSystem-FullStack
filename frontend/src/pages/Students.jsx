@@ -185,7 +185,6 @@ export default function Students() {
             grades={grades}
             onGradeChange={setActiveGrade}
             sections={mySections}
-            students={students}
             nextId={nextId}
             onSaved={saved}
           />

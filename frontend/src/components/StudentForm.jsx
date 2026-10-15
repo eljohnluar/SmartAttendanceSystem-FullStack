@@ -36,7 +36,6 @@ export function StudentForm({
   onGradeChange,
   teachers,
   sections,
-  students,
   nextId,
   onSaved,
   bare = false,

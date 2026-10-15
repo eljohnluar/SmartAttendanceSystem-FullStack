@@ -1,6 +1,8 @@
 """Attendance service entrypoint.
 
     python main.py            # watch the USB scanner (or the keyboard simulator)
+    python main.py --open     # also open the app in the default browser
+    python main.py --no-web   # skip serving frontend/dist
     python main.py --once 3   # log a single scan for fingerprint ID 3 and exit
     python main.py --clear 1  # drop the print saved under fingerprint ID 1
     python main.py --probe 30 # watch the scanner answer presses for 30 seconds
@@ -14,6 +16,7 @@ import time
 from datetime import datetime
 
 import sync as template_sync
+import webapp
 import zkfp
 from capture import CaptureDriver
 from config import load_settings
@@ -25,7 +28,7 @@ from staff_sync import provision_pending
 
 # Bumped with every backend change that the live rig must pick up; the tag
 # rides in the heartbeat so the web pill shows which build is actually running.
-BUILD = "2026-10-06a"
+BUILD = "2026-10-15a"
 
 
 def describe(settings, store, scanner, notifier) -> str:
@@ -160,6 +163,10 @@ def main(argv: list[str]) -> int:
         index = argv.index("--probe") + 1
         seconds = int(argv[index]) if index < len(argv) and argv[index].isdigit() else 30
         return probe(settings, min(seconds, 300))
+
+    # The page comes up first, so a missing scanner never takes the app with it.
+    if "--no-web" not in argv:
+        webapp.start(settings, open_browser='--open' in argv)
 
     scanner = open_scanner(settings)
     try:

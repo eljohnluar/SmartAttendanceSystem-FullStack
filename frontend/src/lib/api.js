@@ -282,6 +282,45 @@ export const api = {
     return Boolean(data)
   },
 
+  /**
+   * Whether this session has already proved the emailed code. Demo mode has no
+   * mailer and no server-side gate, so it answers yes.
+   */
+  async loginVerified() {
+    if (!isLive) return true
+    const { data, error } = await supabase.rpc('login_ok')
+    if (error) throw new Error(error.message)
+    return Boolean(data)
+  },
+
+  /**
+   * Asks Supabase to email a sign-in code. The digits never come near this app:
+   * Supabase makes them up, sends them, times them out and counts the guesses.
+   */
+  async requestLoginOtp(email) {
+    if (!isLive) return 'demo mode sends no email'
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false } })
+    if (error) throw new Error(error.message)
+    return email
+  },
+
+  /**
+   * Hands over the digits from that email. On a match Supabase swaps the
+   * password session for one that answered the code, and login_ok() is what
+   * says so — checking it here turns "the code was right but the records are
+   * still shut" into an error on screen instead of a silent dead end.
+   */
+  async verifyLoginOtp(email, code) {
+    if (!isLive) return true
+    const { error } = await supabase.auth.verifyOtp({ email, token: String(code).trim(), type: 'email' })
+    if (error) return false
+    if (await api.loginVerified()) return true
+    throw new Error(
+      'That code was accepted, but this sign-in still cannot open the records. Ask for a new code, ' +
+        'and if it happens again report the sign-in settings.',
+    )
+  },
+
   /** Clock the signed-in staff member in for today. */
   async timeIn() {
     if (!isLive) return demo.timeIn()
@@ -383,11 +422,16 @@ export const api = {
       status: 'active',
     })
     if (error) {
-      throw new Error(
-        error.code === '23505'
-          ? 'That email is already on the staff list.'
-          : 'Self-registration is closed right now, so this account was not added. An admin can add you from the Staff page.',
-      )
+      // 23505 is the unique email, 42501 the row-level security refusal a
+      // closed registration flag produces. Anything else — a function missing
+      // from a schema that has not been re-run, say — deserves its own words.
+      if (error.code === '23505') throw new Error('That email is already on the staff list.')
+      if (error.code === '42501') {
+        throw new Error(
+          'Self-registration is closed right now, so this account was not added. An admin can add you from the Staff page.',
+        )
+      }
+      throw new Error(`The account could not be added to the staff list: ${error.message}`)
     }
   },
 

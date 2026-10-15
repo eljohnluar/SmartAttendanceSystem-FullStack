@@ -19,6 +19,9 @@ export function watchAuth(onChange) {
 export async function signIn(email, password) {
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
+    if (/confirm/i.test(error.message)) {
+      throw new Error('That address has not been confirmed yet. Open the link we emailed, then sign in again.')
+    }
     throw new Error(
       error.message.includes('Invalid login credentials')
         ? 'That email and password did not match. Create the admin user under Supabase Studio > Authentication > Users.'
@@ -32,27 +35,34 @@ export async function signOut() {
 }
 
 /**
- * Creates the account, or signs into it if it already exists. The second half
- * matters because Supabase projects ship with email confirmation switched on:
- * signUp() then returns no session, and a retry would fail as a duplicate.
+ * Creates the account, or signs into it if it already exists.
+ *
+ * With "Confirm email" switched on — which is how an admin registration is
+ * supposed to work — signUp() returns a user, an emailed link, and *no session
+ * and no error*. That combination is the confirmation case, not a failure, and
+ * it must be recognised before anything tries to sign in, because an
+ * unconfirmed account answers that attempt with "Email not confirmed".
  */
-export async function registerOrSignIn(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password })
+export async function registerOrSignIn(email, password, fullName) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: fullName } },
+  })
 
-  if (!error && data.session) return data.user
+  if (!error && !data.session) return { user: data.user, needsConfirmation: true }
+  if (!error) return { user: data.user, needsConfirmation: false }
 
-  const duplicate = /already registered|an account with|user already/i.test(error?.message ?? '')
-  if (error && !duplicate) throw new Error(error.message)
+  const duplicate = /already registered|an account with|user already/i.test(error.message)
+  if (!duplicate) throw new Error(error.message)
 
+  // The address was taken. A password that fits means it was already confirmed,
+  // so this is really a sign-in.
   const retry = await supabase.auth.signInWithPassword({ email, password })
-  if (retry.error) {
-    throw new Error(
-      duplicate
-        ? 'That email is already registered. Sign in instead, or use a different address.'
-        : 'Account created, but no session was returned. Turn off "Confirm email" in Supabase Studio > Authentication > Sign In / Up, then sign in.',
-    )
-  }
-  return retry.data.user
+  if (!retry.error) return { user: retry.data.user, needsConfirmation: false }
+  if (/confirm/i.test(retry.error.message)) return { user: null, needsConfirmation: true }
+
+  throw new Error(retry.error.message)
 }
 
 /**
@@ -76,4 +86,3 @@ export async function verifyPassword(email, password) {
   }
   return true
 }
-

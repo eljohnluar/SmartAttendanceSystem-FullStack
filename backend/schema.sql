@@ -253,8 +253,18 @@ create table if not exists public.attendance_marks (
 create table if not exists public.app_flags (
   id                 integer primary key default 1 check (id = 1),
   self_registration  boolean not null default true,
+  require_login_otp  boolean not null default false,
   updated_at         timestamptz not null default now()
 );
+
+-- Off by default on purpose: with it on, every screen needs a code that only
+-- Supabase's auth mailer can send, so turning it on before the web app that
+-- asks for one is in place — or with the SMTP settings unfilled — locks
+-- everyone out. Switch it on when they are:
+--
+--   update public.app_flags set require_login_otp = true;
+alter table public.app_flags
+  add column if not exists require_login_otp boolean not null default false;
 
 -- ── Table 9: staff_time_logs (teacher/admin time-in & time-out) ────────
 -- One row per staff member per day. time_out is null while the person is
@@ -277,6 +287,18 @@ create index if not exists staff_time_logs_staff_idx
 create index if not exists staff_time_logs_date_idx
   on public.staff_time_logs (work_date);
 
+-- ── Sign-in codes: retired objects ───────────────────────────────────
+-- Earlier versions of this file kept the sign-in code in the database: the
+-- browser queued a challenge, the Python service emailed the digits and stored
+-- their hash, and login_verifications recorded who had answered. Supabase's own
+-- auth mailer does all three now, so a session that arrived by code is already
+-- provable from its token and there is nothing for those tables to hold.
+-- Dropped here so re-running this file cleans up after the old design.
+drop function if exists public.request_login_otp();
+drop function if exists public.verify_login_otp(text);
+drop table if exists public.login_challenges;
+drop table if exists public.login_verifications;
+
 -- Seeded open while the system is under development so you can register as many
 -- test accounts as you like. do-nothing on purpose: re-running this file must
 -- never quietly re-open a door you closed. Close it before a school uses this:
@@ -284,14 +306,75 @@ create index if not exists staff_time_logs_date_idx
 --   update public.app_flags set self_registration = false;
 insert into public.app_flags (id) values (1) on conflict (id) do nothing;
 
+-- ── The sign-in gate ─────────────────────────────────────────────────
+-- Password first, then a 6-digit code Supabase emails to the person's own
+-- address. Nothing in this database holds the code, its hash, or the answer:
+-- Supabase generates it, sends it, times it out and counts the wrong guesses,
+-- and the only trace left is the token of the session that came out the other
+-- side. That is what makes this gate safe to ask about from a policy — the
+-- session either proved the mailbox or it did not, and no client can write a
+-- row to say otherwise.
+--
+-- These two come before the accessor functions, which is where they read oddly:
+-- a `language sql` body is parsed the moment the function is created, so
+-- my_role() cannot mention login_ok() until login_ok() exists.
+--
+-- The whole thing sits behind app_flags.require_login_otp so a database can be
+-- migrated before the web app is ready for it.
+create or replace function public.otp_required() returns boolean
+language sql stable security definer set search_path = public as
+$$
+  select coalesce((select require_login_otp from public.app_flags where id = 1), false);
+$$;
+
+revoke execute on function public.otp_required() from public;
+grant execute on function public.otp_required() to anon, authenticated;
+
+-- Did this session arrive by answering a code, or just by typing a password?
+-- Supabase lists the methods used in the token's `amr` claim. It has appeared
+-- both as bare strings and as objects carrying a method, so both are read;
+-- anything else about a token answers no.
+create or replace function public.session_used_code() returns boolean
+language sql stable set search_path = public as
+$$
+  select exists (
+    select 1
+      from jsonb_array_elements(
+        case when jsonb_typeof(auth.jwt() -> 'amr') = 'array'
+             then auth.jwt() -> 'amr'
+             else '[]'::jsonb end
+      ) as m
+     where coalesce(m ->> 'method', m #>> '{}') in ('otp', 'email')
+  );
+$$;
+
+revoke execute on function public.session_used_code() from public;
+grant execute on function public.session_used_code() to anon, authenticated;
+
+-- The one question every policy asks: is this session allowed to see anything?
+-- An anonymous kiosk visitor has no code and no auth.uid(), so they are never
+-- answered true; the kiosk gets its access through is_public_kiosk() instead.
+create or replace function public.login_ok() returns boolean
+language sql stable security definer set search_path = public as
+$$
+  select not public.otp_required() or public.session_used_code();
+$$;
+
+revoke execute on function public.login_ok() from public;
+grant execute on function public.login_ok() to anon, authenticated;
+
 -- ── Accessor functions ───────────────────────────────────────────────
 -- security definer so the bodies read staff_profiles without re-triggering
 -- the very policies that call them (which would recurse).
+--
+-- All three answer as if the person had no role at all until their sign-in code
+-- is confirmed, which is what makes login_ok() a real gate rather than a
+-- suggestion: is_admin() and owns() are built on these.
 create or replace function public.my_role() returns text
 language sql stable security definer set search_path = public as
 $$
   select role from public.staff_profiles
-  where auth_id = auth.uid() and status = 'active';
+  where auth_id = auth.uid() and status = 'active' and public.login_ok();
 $$;
 
 create or replace function public.my_grades() returns text[]
@@ -306,7 +389,7 @@ $$
               else array_remove(array[sp.grade_level], null)
             end
        from public.staff_profiles sp
-      where sp.auth_id = auth.uid() and sp.status = 'active'),
+      where sp.auth_id = auth.uid() and sp.status = 'active' and public.login_ok()),
     '{}'
   );
 $$;
@@ -321,7 +404,7 @@ $$
   select coalesce(
     (select array_remove(sp.sections, null)
        from public.staff_profiles sp
-      where sp.auth_id = auth.uid() and sp.status = 'active'),
+      where sp.auth_id = auth.uid() and sp.status = 'active' and public.login_ok()),
     '{}'
   );
 $$;
@@ -462,7 +545,7 @@ create policy "status readable" on public.backend_status
   for select using (true);
 
 create policy "staff readable" on public.staff_profiles
-  for select using (public.is_admin() or auth_id = auth.uid());
+  for select using ((public.is_admin() or auth_id = auth.uid()) and public.login_ok());
 
 create policy "staff writable" on public.staff_profiles
   for insert with check (public.is_admin());
@@ -476,6 +559,7 @@ create policy "staff bootstrap admin" on public.staff_profiles
     auth_id = auth.uid()
     and role = 'admin'
     and public.registration_open()
+    and public.login_ok()
   );
 
 create policy "staff editable" on public.staff_profiles
@@ -490,10 +574,12 @@ drop policy if exists "captures readable" on public.fingerprint_captures;
 drop policy if exists "captures creatable" on public.fingerprint_captures;
 
 create policy "captures readable" on public.fingerprint_captures
-  for select to authenticated using (true);
+  for select to authenticated using (public.login_ok());
 
 create policy "captures creatable" on public.fingerprint_captures
-  for insert to authenticated with check (requested_by = auth.uid());
+  for insert to authenticated with check (
+    requested_by = auth.uid() and public.login_ok()
+  );
 
 -- ── Per-grade late rule ──────────────────────────────────────────────
 -- A teacher sets the rule for their own class; an admin may set any class.
@@ -562,6 +648,7 @@ begin
   update public.staff_profiles
      set max_session_hours = p_hours, updated_at = now()
    where id = p_staff_id
+     and public.login_ok()
      and (public.is_admin() or auth_id = auth.uid())
   returning * into v_row;
 
@@ -587,15 +674,24 @@ drop policy if exists "time logs writable" on public.staff_time_logs;
 drop policy if exists "time logs admin readable" on public.staff_time_logs;
 
 create policy "time logs readable" on public.staff_time_logs
-  for select using (staff_id = (select id from public.staff_profiles where auth_id = auth.uid()));
+  for select using (
+    staff_id = (select id from public.staff_profiles where auth_id = auth.uid())
+    and public.login_ok()
+  );
 
 -- Admins see everyone's usage time; teachers keep seeing only their own row.
 create policy "time logs admin readable" on public.staff_time_logs
   for select using (public.is_admin());
 
 create policy "time logs writable" on public.staff_time_logs
-  for all using (staff_id = (select id from public.staff_profiles where auth_id = auth.uid()))
-  with check (staff_id = (select id from public.staff_profiles where auth_id = auth.uid()));
+  for all using (
+    staff_id = (select id from public.staff_profiles where auth_id = auth.uid())
+    and public.login_ok()
+  )
+  with check (
+    staff_id = (select id from public.staff_profiles where auth_id = auth.uid())
+    and public.login_ok()
+  );
 
 -- Clock the signed-in staff member in for today. Idempotent: a second
 -- call on the same day returns the existing row rather than erroring.
@@ -610,7 +706,7 @@ declare
 begin
   select * into v_staff
     from public.staff_profiles
-   where auth_id = auth.uid() and status = 'active';
+   where auth_id = auth.uid() and status = 'active' and public.login_ok();
 
   if v_staff is null then
     raise exception 'No active staff profile for this account';
@@ -653,7 +749,7 @@ declare
 begin
   select * into v_staff
     from public.staff_profiles
-   where auth_id = auth.uid() and status = 'active';
+   where auth_id = auth.uid() and status = 'active' and public.login_ok();
 
   if v_staff is null then
     raise exception 'No active staff profile for this account';
@@ -694,6 +790,7 @@ $$
     from public.staff_time_logs as l
     join public.staff_profiles as s on s.id = l.staff_id
    where s.auth_id = auth.uid()
+     and public.login_ok()
      and l.work_date = current_date
    order by l.time_in desc
    limit 1;

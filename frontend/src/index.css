@@ -1495,6 +1495,15 @@ td em {
   grid-column: unset;
 }
 
+/* The sign-in code: large, centred, and impossible to misread. */
+.otp-input {
+  font-size: 30px;
+  letter-spacing: 0.42em;
+  text-align: center;
+  font-family: var(--mono);
+  padding: 14px 8px 14px 18px;
+}
+
 .login-alt {
   display: flex;
   align-items: center;

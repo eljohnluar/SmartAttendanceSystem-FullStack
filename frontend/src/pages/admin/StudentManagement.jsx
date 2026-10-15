@@ -100,7 +100,7 @@ export default function StudentManagement() {
 
       {adding && (
         <Modal title="Add student" wide onClose={() => setAdding(false)}>
-          <StudentForm bare students={students} teachers={teachers} nextId={nextId} onSaved={saved} />
+          <StudentForm bare teachers={teachers} nextId={nextId} onSaved={saved} />
         </Modal>
       )}
 

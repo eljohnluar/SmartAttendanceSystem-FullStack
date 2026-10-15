@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, mode } from './lib/api.js'
 import { demoRole } from './lib/demo.js'
 import { getCurrentUser, signOut as endSession, watchAuth } from './lib/auth.js'
@@ -45,6 +45,31 @@ export function AppProvider({ children }) {
   const [registrationOpen, setRegistrationOpen] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [timeRemaining, setTimeRemaining] = useState(null)
+  // A signed-in session that has not proved the emailed code yet. Everything
+  // reads as empty until it does, because row-level security says so.
+  const [needsOtp, setNeedsOtp] = useState(false)
+  // Why a registered admin could not be added to the staff list, if that failed.
+  const [claimError, setClaimError] = useState('')
+  const claimTriedFor = useRef(null)
+
+  // A self-registered account has a login before it has a staff row, and the
+  // row can only be claimed by the signed-in user themselves. Attempted here
+  // rather than from the login screen because a reload never mounts that
+  // screen, which used to strand a half-created account on the no-role notice.
+  // Once per account per page load: a refusal is reported, not retried every
+  // time the roster refreshes.
+  const claimAdminRow = useCallback(async (signedIn) => {
+    const name = signedIn?.user_metadata?.full_name
+    if (!signedIn || !name || claimTriedFor.current === signedIn.id) return null
+    claimTriedFor.current = signedIn.id
+    try {
+      await api.claimAdminProfile(name)
+      return await api.myStaffProfile()
+    } catch (error) {
+      setClaimError(error.message)
+      return null
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -62,15 +87,27 @@ export function AppProvider({ children }) {
   const refreshStaff = useCallback(async () => {
     // null means we could not tell, which the register screen treats as closed
     setRegistrationOpen(await api.registrationOpen().catch(() => null))
+    const signedIn = await getCurrentUser()
+    // Asked first and independently of the staff row: an unverified session
+    // cannot read staff_profiles at all, so `me` would be null either way.
+    const verified = await api.loginVerified().catch(() => true)
+    // Only a session can owe a code. login_ok() answers false for a signed-out
+    // visitor because there is nobody to answer for, not because a code is
+    // waiting, and taking that at face value used to throw every visitor
+    // straight at the code screen — including the sign-out below, whose own
+    // reset this call finishes after.
+    const owesCode = Boolean(signedIn) && !verified
     try {
-      const me = await api.myStaffProfile()
+      const me = (await api.myStaffProfile()) || (await claimAdminRow(signedIn))
       setStaff(me ?? null)
       setTeam(me?.role === 'admin' ? ((await api.listStaff()) ?? []) : [])
+      setNeedsOtp(owesCode)
     } catch {
       setStaff(null)
       setTeam([])
+      setNeedsOtp(owesCode)
     }
-  }, [])
+  }, [claimAdminRow])
 
   useEffect(() => {
     const onChange = () => {
@@ -106,6 +143,10 @@ export function AppProvider({ children }) {
     await endSession()
     setUser(null)
     setStaff(null)
+    setNeedsOtp(false)
+    // A fresh sign-in is a fair chance to retry a claim that failed.
+    claimTriedFor.current = null
+    setClaimError('')
     setTimeRemaining(null)
     // Drop the roster too, so a signed-out screen can never render class data
     // left over in memory from the previous session.
@@ -125,7 +166,7 @@ export function AppProvider({ children }) {
   const grades = useMemo(() => gradesOf(staff), [staff])
   const [activeGrade, setActiveGrade] = useState(null)
   useEffect(() => {
-    setActiveGrade((current) => (grades.includes(current) ? current : grades[0] ?? null))
+    setActiveGrade((current) => (grades.includes(current) ? current : (grades[0] ?? null)))
   }, [grades])
 
   // Auto-start the countdown when a staff member signs in
@@ -160,22 +201,27 @@ export function AppProvider({ children }) {
     }
   }, [timeRemaining])
 
-  // public = signed out, pending/failed = a login with no usable staff row
+  // public = signed out, unverified = a session that has not proved its emailed
+  // code, pending/failed = a login with no usable staff row
   const access = useMemo(() => {
     if (mode === 'demo') return demoRole()
     if (!user) return 'public'
+    if (needsOtp) return 'unverified'
     if (!staff) return 'pending'
     if (staff.status === 'active') return staff.role
     return staff.status
-  }, [user, staff])
+  }, [user, staff, needsOtp])
 
-  const setMaxSessionHours = useCallback(async (staffId, hours) => {
-    const row = await api.setMaxSessionHours(staffId, hours)
-    if (staffId === staff?.id) {
-      setStaff(row)
-    }
-    setTeam((prev) => prev.map((r) => (r.id === staffId ? row : r)))
-  }, [staff?.id])
+  const setMaxSessionHours = useCallback(
+    async (staffId, hours) => {
+      const row = await api.setMaxSessionHours(staffId, hours)
+      if (staffId === staff?.id) {
+        setStaff(row)
+      }
+      setTeam((prev) => prev.map((r) => (r.id === staffId ? row : r)))
+    },
+    [staff?.id],
+  )
 
   const value = useMemo(
     () => ({
@@ -192,7 +238,9 @@ export function AppProvider({ children }) {
       setActiveGrade,
       team,
       access,
+      needsOtp,
       registrationOpen,
+      claimError,
       timeRemaining,
       refresh,
       refreshStaff,
@@ -200,7 +248,27 @@ export function AppProvider({ children }) {
       setMaxSessionHours,
       simulateScan: api.simulateScan,
     }),
-    [students, logs, marks, backend, loadError, user, staff, grades, activeGrade, team, access, registrationOpen, timeRemaining, refresh, refreshStaff, signOut, setMaxSessionHours],
+    [
+      students,
+      logs,
+      marks,
+      backend,
+      loadError,
+      user,
+      staff,
+      grades,
+      activeGrade,
+      team,
+      access,
+      needsOtp,
+      registrationOpen,
+      claimError,
+      timeRemaining,
+      refresh,
+      refreshStaff,
+      signOut,
+      setMaxSessionHours,
+    ],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

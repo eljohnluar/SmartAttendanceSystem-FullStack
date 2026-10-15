@@ -45,14 +45,16 @@ function hashPath() {
 }
 
 /** Unprovisioned logins get no navigation at all. */
-function Bare({ access, user, staff, onSignOut }) {
+function Bare({ access, user, staff, claimError, onSignOut }) {
   if (access === 'pending') {
     return (
-      <Notice title="Waiting for approval">
+      <Notice title={staff ? 'Waiting for approval' : 'Not on the staff list'}>
         <p>
-          {user?.email} has an account but no role yet. An admin assigns grades from the Staff page, and the
-          Python service finishes creating the login — it has to be running for that.
+          {staff
+            ? `${user?.email} is on the staff list but not active yet. An admin sets their grades from the Staff page, and the login is finished a few seconds later — it needs the machine with the scanner to be switched on and running.`
+            : `${user?.email} signed in, but nothing on the staff list belongs to it yet. Reloading this page tries again; if that does not work, an admin can add this address from the Staff page.`}
         </p>
+        {claimError && !staff && <p className="alert alert-error">{claimError}</p>}
         <p>
           <button type="button" className="link-btn" onClick={onSignOut}>
             Sign out
@@ -65,8 +67,8 @@ function Bare({ access, user, staff, onSignOut }) {
   return (
     <Notice title="Account could not be created">
       <p>
-        The backend tried to provision {user?.email} and failed: {staff?.error || 'no reason given'}. An admin
-        can retry from the Staff page.
+        Adding {user?.email} to the staff list did not work: {staff?.error || 'no reason given'}. An admin can
+        retry from the Staff page.
       </p>
       <p>
         <button type="button" className="link-btn" onClick={onSignOut}>
@@ -78,7 +80,7 @@ function Bare({ access, user, staff, onSignOut }) {
 }
 
 function Shell() {
-  const { access, user, staff, signOut } = useApp()
+  const { access, user, staff, claimError, signOut } = useApp()
   const [path, setPath] = useState(hashPath)
 
   useEffect(() => {
@@ -96,11 +98,13 @@ function Shell() {
     if (access === 'pending' || access === 'failed') {
       return (
         <div className="bare">
-          <Bare access={access} user={user} staff={staff} onSignOut={signOut} />
+          <Bare access={access} user={user} staff={staff} claimError={claimError} onSignOut={signOut} />
         </div>
       )
     }
-    if (current === 'kiosk') {
+    // A session that has not proved its code sees no data at all, so the kiosk
+    // would only show an empty screen. Send them to the code step instead.
+    if (current === 'kiosk' && access !== 'unverified') {
       return (
         <div className="kiosk-bare">
           <Kiosk />

@@ -45,6 +45,7 @@ class Settings:
     duplicate_scan_minutes: int
     heartbeat_seconds: int
     resync_seconds: int
+    web_port: int
     from_override: str
 
     @property
@@ -88,5 +89,6 @@ def load_settings() -> Settings:
         duplicate_scan_minutes=_get_int("DUPLICATE_SCAN_MINUTES", 45),
         heartbeat_seconds=_get_int("HEARTBEAT_SECONDS", 5),
         resync_seconds=_get_int("TEMPLATE_RESYNC_SECONDS", 60),
+        web_port=_get_int("WEB_PORT", 8766),
         from_override=_get("EMAIL_FROM_OVERRIDE"),
     )
