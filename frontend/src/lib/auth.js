@@ -1,4 +1,5 @@
-import { isLive, supabase } from './config.js'
+import { createClient } from '@supabase/supabase-js'
+import { isLive, supabase, supabaseAnonKey, supabaseUrl } from './config.js'
 
 export const authAvailable = isLive
 
@@ -47,7 +48,12 @@ export async function registerOrSignIn(email, password, fullName) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName } },
+    // Land back on the sign-in screen, not the site root — the root renders
+    // the kiosk for guests, which used to swallow the confirmation session.
+    options: {
+      data: { full_name: fullName },
+      emailRedirectTo: `${window.location.origin}${window.location.pathname}#/login`,
+    },
   })
 
   if (!error && !data.session) return { user: data.user, needsConfirmation: true }
@@ -68,7 +74,14 @@ export async function registerOrSignIn(email, password, fullName) {
 /**
  * Verifies the staff user's password for sensitive action confirmations
  * (e.g. saving students or saving system/grade configurations).
+ *
+ * Checked on an isolated client that never persists a session, so the current
+ * sign-in — including its emailed-code proof — is left untouched. Signing in
+ * on the main client here used to swap the verified session for a
+ * password-only one and bounce the user back to the code step.
  */
+let passwordChecker = null
+
 export async function verifyPassword(email, password) {
   const trimmed = password?.trim()
   if (!trimmed) {
@@ -77,7 +90,10 @@ export async function verifyPassword(email, password) {
   if (!isLive || !email) {
     return true
   }
-  const { error } = await supabase.auth.signInWithPassword({
+  passwordChecker ??= createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+  const { error } = await passwordChecker.auth.signInWithPassword({
     email,
     password: trimmed,
   })

@@ -141,6 +141,14 @@ export default function AuditLog() {
     .filter((row) => row.work_date === todayStamp && row.time_in && row.time_out)
     .reduce((sum, row) => sum + (new Date(row.time_out).getTime() - new Date(row.time_in).getTime()), 0)
 
+  function resetFilters() {
+    setQuery('')
+    setAction('all')
+    setEntity('all')
+    setRange(RANGE_OPTIONS[1])
+    document.getElementById('audit-what-changed')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <section className="page">
       <header className="page-head page-head-row">
@@ -167,6 +175,9 @@ export default function AuditLog() {
           </div>
           <button type="button" className="btn btn-quiet" onClick={load} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button type="button" className="btn btn-quiet" onClick={resetFilters}>
+            Reset
           </button>
         </div>
       </header>
@@ -271,7 +282,7 @@ export default function AuditLog() {
           )}
         </article>
 
-        <article className="card">
+        <article className="card" id="audit-what-changed">
           <h2>What changed</h2>
           <p className="hint">Every roster, staff, mark, and rule change, plus sign-ins and resets.</p>
           {visibleAudits.length === 0 ? (

@@ -5,6 +5,9 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const isLive = Boolean(url && anonKey)
 
+export const supabaseUrl = url
+export const supabaseAnonKey = anonKey
+
 export const supabase = isLive
   ? createClient(url, anonKey, { realtime: { params: { eventsPerSecond: 10 } } })
   : null

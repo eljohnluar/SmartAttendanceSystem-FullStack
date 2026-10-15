@@ -191,6 +191,25 @@ export function AppProvider({ children }) {
     return () => clearInterval(timer)
   }, [timeRemaining === null])
 
+  // Auto-logout after 15 minutes without any interaction. Re-arms on every
+  // mouse, touch, scroll or keyboard event; only runs while signed in.
+  useEffect(() => {
+    if (!user) return undefined
+    const INACTIVITY_LIMIT_MS = 5 * 60 * 1000
+    let timer = null
+    const arm = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => signOut(), INACTIVITY_LIMIT_MS)
+    }
+    arm()
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click']
+    events.forEach((name) => window.addEventListener(name, arm, { passive: true }))
+    return () => {
+      if (timer) clearTimeout(timer)
+      events.forEach((name) => window.removeEventListener(name, arm))
+    }
+  }, [user, signOut])
+
   // Auto-logout when the countdown reaches zero — redirects to the attendance page
   useEffect(() => {
     if (timeRemaining === 0) {

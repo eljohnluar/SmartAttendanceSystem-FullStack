@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../lib/api.js'
+import { verifyPassword } from '../../lib/auth.js'
 import { GradeFields } from '../../components/GradeFields.jsx'
 import { SectionFields, cleanSections, knownSections } from '../../components/SectionFields.jsx'
 import { cleanGrades } from '../../lib/grades.js'
@@ -11,7 +12,11 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grades: [], sections: [], temp_password: generatePassword(), max_session_hours: 8 })
 
 export default function AddStaff() {
-  const { refreshStaff, mode, students } = useApp()
+  const { refreshStaff, mode, students, user, staff } = useApp()
+  const [unlocked, setUnlocked] = useState(false)
+  const [gatePassword, setGatePassword] = useState('')
+  const [gateError, setGateError] = useState('')
+  const [gateBusy, setGateBusy] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(null)
@@ -33,6 +38,26 @@ export default function AddStaff() {
   // pick from then on.
   const gradesInUse = [...new Set(students.map((student) => student.grade_level).filter(Boolean))].sort()
   const sectionsInUse = knownSections(students, form.grades[0])
+
+  async function unlock(event) {
+    event.preventDefault()
+    setGateError('')
+    const trimmed = gatePassword.trim()
+    if (!trimmed) {
+      setGateError('Enter your password to open this page.')
+      return
+    }
+    setGateBusy(true)
+    try {
+      await verifyPassword(user?.email || staff?.email, trimmed)
+      setGatePassword('')
+      setUnlocked(true)
+    } catch (unlockError) {
+      setGateError(unlockError.message)
+    } finally {
+      setGateBusy(false)
+    }
+  }
 
   async function submit(event) {
     event.preventDefault()
@@ -83,6 +108,58 @@ export default function AddStaff() {
         </p>
       </header>
 
+      {!unlocked ? (
+        <form className="card password-confirm" onSubmit={unlock} noValidate>
+          <div className="password-confirm-head">
+            <span className="password-confirm-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                width="24"
+                height="24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Restricted area</h3>
+              <p className="hint" style={{ marginTop: '2px' }}>
+                Enter your own password to open staff onboarding.
+              </p>
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="addstaff_gate_password">Your password</label>
+            <input
+              id="addstaff_gate_password"
+              type="password"
+              placeholder="Enter password"
+              value={gatePassword}
+              onChange={(event) => {
+                setGatePassword(event.target.value)
+                setGateError('')
+              }}
+              autoFocus
+              autoComplete="current-password"
+            />
+            <span className="hint">Only admins who know their own password may add staff.</span>
+          </div>
+
+          {gateError && <p className="alert alert-error">{gateError}</p>}
+
+          <div className="form-actions">
+            <button type="submit" className="btn btn-primary" disabled={gateBusy || !gatePassword.trim()}>
+              {gateBusy ? 'Checking…' : 'Unlock'}
+            </button>
+          </div>
+        </form>
+      ) : (
       <div className="split">
         <form className="card form" onSubmit={submit} noValidate>
           <div className="field">
@@ -208,6 +285,7 @@ export default function AddStaff() {
           </ol>
         </aside>
       </div>
+      )}
     </section>
   )
 }
