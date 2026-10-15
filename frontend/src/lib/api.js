@@ -428,7 +428,8 @@ export const api = {
       if (error.code === '23505') throw new Error('That email is already on the staff list.')
       if (error.code === '42501') {
         throw new Error(
-          'Self-registration is closed right now, so this account was not added. An admin can add you from the Staff page.',
+          'The staff list would not accept it: an account may only add itself while registration is open and '
+            + 'its sign-in code has been confirmed. An admin can add this address from the Staff page.',
         )
       }
       throw new Error(`The account could not be added to the staff list: ${error.message}`)

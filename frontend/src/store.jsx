@@ -58,10 +58,14 @@ export function AppProvider({ children }) {
   // screen, which used to strand a half-created account on the no-role notice.
   // Once per account per page load: a refusal is reported, not retried every
   // time the roster refreshes.
-  const claimAdminRow = useCallback(async (signedIn) => {
+  const claimAdminRow = useCallback(async (signedIn, registrationIsOpen) => {
     const name = signedIn?.user_metadata?.full_name
     if (!signedIn || !name || claimTriedFor.current === signedIn.id) return null
     claimTriedFor.current = signedIn.id
+    // Closed registration is not a reason to try, and trying anyway reported it
+    // as an error against the account rather than the switch. The notice already
+    // says an admin can add this address from the Staff page.
+    if (registrationIsOpen === false) return null
     try {
       await api.claimAdminProfile(name)
       return await api.myStaffProfile()
@@ -86,7 +90,8 @@ export function AppProvider({ children }) {
 
   const refreshStaff = useCallback(async () => {
     // null means we could not tell, which the register screen treats as closed
-    setRegistrationOpen(await api.registrationOpen().catch(() => null))
+    const open = await api.registrationOpen().catch(() => null)
+    setRegistrationOpen(open)
     const signedIn = await getCurrentUser()
     // Asked first and independently of the staff row: an unverified session
     // cannot read staff_profiles at all, so `me` would be null either way.
@@ -98,7 +103,7 @@ export function AppProvider({ children }) {
     // reset this call finishes after.
     const owesCode = Boolean(signedIn) && !verified
     try {
-      const me = (await api.myStaffProfile()) || (await claimAdminRow(signedIn))
+      const me = (await api.myStaffProfile()) || (await claimAdminRow(signedIn, open))
       setStaff(me ?? null)
       setTeam(me?.role === 'admin' ? ((await api.listStaff()) ?? []) : [])
       setNeedsOtp(owesCode)
