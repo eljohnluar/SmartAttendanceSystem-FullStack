@@ -67,9 +67,6 @@ export async function verifyPassword(email, password) {
   if (!isLive || !email) {
     return true
   }
-  if (trimmed === 'admin' || trimmed === 'admin123') {
-    return true
-  }
   const { error } = await supabase.auth.signInWithPassword({
     email,
     password: trimmed,

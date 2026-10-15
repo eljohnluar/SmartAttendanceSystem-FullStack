@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../lib/api.js'
 import { registerOrSignIn } from '../lib/auth.js'
+import { passwordError, PASSWORD_HINT } from '../lib/password.js'
 import { Notice } from '../components/ui.jsx'
 import { useApp } from '../lib/useApp.js'
 
@@ -60,7 +61,8 @@ export default function Register() {
     const address = email.trim().toLowerCase()
     if (!fullName.trim()) return setError('Enter your name.')
     if (!EMAIL_PATTERN.test(address)) return setError('Enter a valid email address.')
-    if (password.length < 8) return setError('Use at least 8 characters.')
+    const problem = passwordError(password)
+    if (problem) return setError(problem)
     if (password !== confirm) return setError('The two passwords do not match.')
 
     setBusy(true)
@@ -114,6 +116,7 @@ export default function Register() {
             onChange={(event) => setPassword(event.target.value)}
             autoComplete="new-password"
           />
+          <span className="hint">{PASSWORD_HINT}</span>
         </div>
 
         <div className="field">

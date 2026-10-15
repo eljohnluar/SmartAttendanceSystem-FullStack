@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../lib/api.js'
 import { signIn } from '../lib/auth.js'
 import { useApp } from '../lib/useApp.js'
 
@@ -16,6 +17,8 @@ export default function Login({ onSignedIn }) {
     try {
       await signIn(email.trim(), password)
       setPassword('')
+      // Leave a sign-in trail for the admin audit log; never blocks login.
+      api.logAudit('sign_in', 'session', `Signed in ${email.trim()}`).catch(() => {})
       window.location.hash = '#/home'
       onSignedIn?.()
     } catch (signInError) {

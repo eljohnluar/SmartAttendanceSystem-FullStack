@@ -584,9 +584,14 @@ alter table public.staff_time_logs enable row level security;
 
 drop policy if exists "time logs readable" on public.staff_time_logs;
 drop policy if exists "time logs writable" on public.staff_time_logs;
+drop policy if exists "time logs admin readable" on public.staff_time_logs;
 
 create policy "time logs readable" on public.staff_time_logs
   for select using (staff_id = (select id from public.staff_profiles where auth_id = auth.uid()));
+
+-- Admins see everyone's usage time; teachers keep seeing only their own row.
+create policy "time logs admin readable" on public.staff_time_logs
+  for select using (public.is_admin());
 
 create policy "time logs writable" on public.staff_time_logs
   for all using (staff_id = (select id from public.staff_profiles where auth_id = auth.uid()))
@@ -601,20 +606,32 @@ $$
 declare
   v_staff_id uuid;
   v_row public.staff_time_logs;
+  v_staff public.staff_profiles;
 begin
-  select id into v_staff_id
+  select * into v_staff
     from public.staff_profiles
    where auth_id = auth.uid() and status = 'active';
 
-  if v_staff_id is null then
+  if v_staff is null then
     raise exception 'No active staff profile for this account';
   end if;
+  v_staff_id := v_staff.id;
 
   insert into public.staff_time_logs (staff_id, work_date, time_in)
   values (v_staff_id, current_date, now())
   on conflict (staff_id, work_date)
   do update set time_in = now(), updated_at = now()
   returning * into v_row;
+
+  -- Usage-time trail for the admin audit log. Fail-open: a logging hiccup
+  -- must never block clocking in.
+  begin
+    insert into public.audit_logs (actor_id, actor_email, actor_name, actor_role, action, entity_type, entity_id, summary)
+    values (v_staff.id, v_staff.email, v_staff.full_name, v_staff.role, 'time_in', 'staff_time_logs', v_row.id::text,
+            v_staff.full_name || ' clocked in');
+  exception when others then
+    null;
+  end;
 
   return v_row;
 end;
@@ -632,14 +649,16 @@ $$
 declare
   v_staff_id uuid;
   v_row public.staff_time_logs;
+  v_staff public.staff_profiles;
 begin
-  select id into v_staff_id
+  select * into v_staff
     from public.staff_profiles
    where auth_id = auth.uid() and status = 'active';
 
-  if v_staff_id is null then
+  if v_staff is null then
     raise exception 'No active staff profile for this account';
   end if;
+  v_staff_id := v_staff.id;
 
   update public.staff_time_logs
      set time_out = now(), updated_at = now()
@@ -647,6 +666,16 @@ begin
      and work_date = current_date
      and time_out is null
   returning * into v_row;
+
+  if v_row is not null then
+    begin
+      insert into public.audit_logs (actor_id, actor_email, actor_name, actor_role, action, entity_type, entity_id, summary)
+      values (v_staff.id, v_staff.email, v_staff.full_name, v_staff.role, 'time_out', 'staff_time_logs', v_row.id::text,
+              v_staff.full_name || ' clocked out');
+    exception when others then
+      null;
+    end;
+  end if;
 
   return v_row;
 end;
@@ -684,6 +713,7 @@ language plpgsql volatile security definer set search_path = public as
 $$
 declare
   cleared integer;
+  v_staff public.staff_profiles;
 begin
   if p_since is null then
     raise exception 'A starting time is required';
@@ -704,6 +734,16 @@ begin
     returning 1
   )
   select count(*) into cleared from gone;
+  begin
+    select * into v_staff from public.staff_profiles
+     where auth_id = auth.uid() and status = 'active';
+    insert into public.audit_logs (actor_id, actor_email, actor_name, actor_role, action, entity_type, summary, details)
+    values (v_staff.id, v_staff.email, v_staff.full_name, coalesce(v_staff.role, 'system'),
+            'reset', 'attendance_logs', 'Cleared ' || cleared || ' scan(s) for ' || coalesce(p_grade, 'grade'),
+            jsonb_build_object('grade', p_grade, 'cleared', cleared));
+  exception when others then
+    null;
+  end;
   return cleared;
 end;
 $$;
@@ -762,6 +802,171 @@ $$;
 
 revoke execute on function public.kiosk_pulse(timestamptz) from public;
 grant execute on function public.kiosk_pulse(timestamptz) to anon, authenticated;
+
+-- ── Table 10: audit_logs (admin-visible trail of staff changes) ─────
+-- One row per staff action: who did it, what changed, and when. Written by
+-- the log_audit() RPC (explicit frontend events such as sign-in) and by the
+-- audit_trigger() below (automatic create/update/delete on roster, staff,
+-- marks and grade rules), plus time_in/time_out/reset which log inline.
+-- Admins read everything; anyone else reads only their own rows.
+create table if not exists public.audit_logs (
+  id          uuid primary key default gen_random_uuid(),
+  actor_id    uuid references public.staff_profiles(id) on delete set null,
+  actor_email text,
+  actor_name  text,
+  actor_role  text,
+  action      text not null,
+  entity_type text not null,
+  entity_id   text,
+  summary     text not null,
+  details     jsonb not null default '{}',
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists audit_logs_created_idx on public.audit_logs (created_at desc);
+create index if not exists audit_logs_actor_idx on public.audit_logs (actor_id);
+create index if not exists audit_logs_entity_idx on public.audit_logs (entity_type);
+
+alter table public.audit_logs enable row level security;
+
+drop policy if exists "audit readable admin" on public.audit_logs;
+drop policy if exists "audit readable own" on public.audit_logs;
+
+create policy "audit readable admin" on public.audit_logs
+  for select using (public.is_admin());
+
+create policy "audit readable own" on public.audit_logs
+  for select using (actor_id = (select id from public.staff_profiles where auth_id = auth.uid()));
+
+-- Explicit log call from the web app. The actor is resolved server-side from
+-- the caller's JWT, so a client cannot impersonate someone else.
+create or replace function public.log_audit(
+  p_action text,
+  p_entity_type text,
+  p_summary text,
+  p_entity_id text default null,
+  p_details jsonb default '{}'
+)
+returns public.audit_logs
+language plpgsql volatile security definer set search_path = public as
+$$
+declare
+  v_staff public.staff_profiles;
+  v_row public.audit_logs;
+begin
+  if p_action is null or p_action = '' then
+    raise exception 'An action is required';
+  end if;
+  if p_entity_type is null or p_entity_type = '' then
+    raise exception 'An entity type is required';
+  end if;
+  if p_summary is null or p_summary = '' then
+    raise exception 'A summary is required';
+  end if;
+
+  select * into v_staff from public.staff_profiles
+   where auth_id = auth.uid() and status = 'active';
+
+  insert into public.audit_logs (actor_id, actor_email, actor_name, actor_role, action, entity_type, entity_id, summary, details)
+  values (v_staff.id, v_staff.email, v_staff.full_name, coalesce(v_staff.role, 'system'),
+          p_action, p_entity_type, p_entity_id, p_summary, coalesce(p_details, '{}'))
+  returning * into v_row;
+  return v_row;
+end;
+$$;
+
+revoke execute on function public.log_audit(text, text, text, text, jsonb) from public;
+grant execute on function public.log_audit(text, text, text, text, jsonb) to authenticated;
+
+-- Automatic row-level trail. Attached to students, staff_profiles,
+-- attendance_marks and grade_settings below.
+create or replace function public.audit_trigger()
+returns trigger
+language plpgsql security definer set search_path = public as
+$$
+declare
+  v_staff public.staff_profiles;
+  v_action text;
+  v_entity text;
+  v_entity_id text;
+  v_summary text;
+  v_details jsonb;
+  v_row jsonb;
+begin
+  select * into v_staff from public.staff_profiles
+   where auth_id = auth.uid() and status = 'active';
+
+  v_action := lower(TG_OP);
+  v_entity := TG_TABLE_NAME;
+
+  if TG_OP = 'DELETE' then
+    v_row := to_jsonb(OLD) - 'fingerprint_template';
+  else
+    v_row := to_jsonb(NEW) - 'fingerprint_template';
+  end if;
+
+  if TG_OP = 'INSERT' then
+    v_entity_id := coalesce((v_row ->> 'id'), (v_row ->> 'grade_level'));
+    v_details := jsonb_build_object('new', v_row);
+  elsif TG_OP = 'DELETE' then
+    v_entity_id := coalesce((v_row ->> 'id'), (v_row ->> 'grade_level'));
+    v_details := jsonb_build_object('old', v_row);
+  else
+    v_entity_id := coalesce(((to_jsonb(NEW) - 'fingerprint_template') ->> 'id'), ((to_jsonb(NEW) - 'fingerprint_template') ->> 'grade_level'));
+    v_details := jsonb_build_object('old', to_jsonb(OLD) - 'fingerprint_template', 'new', to_jsonb(NEW) - 'fingerprint_template');
+  end if;
+
+  if v_entity = 'students' then
+    v_summary := v_action || ' student '
+      || coalesce((v_row ->> 'first_name'), '')
+      || ' ' || coalesce((v_row ->> 'last_name'), '')
+      || ' (' || coalesce((v_row ->> 'grade_level'), 'no grade') || ')';
+  elsif v_entity = 'staff_profiles' then
+    v_summary := v_action || ' staff ' || coalesce((v_row ->> 'email'), 'unknown');
+  elsif v_entity = 'attendance_marks' then
+    v_summary := v_action || ' attendance mark '
+      || coalesce((v_row ->> 'status'), '');
+  elsif v_entity = 'grade_settings' then
+    v_summary := v_action || ' late rule for ' || coalesce((v_row ->> 'grade_level'), 'grade');
+  else
+    v_summary := v_action || ' ' || v_entity;
+  end if;
+  v_summary := trim(regexp_replace(v_summary, '\s+', ' ', 'g'));
+
+  begin
+    insert into public.audit_logs (actor_id, actor_email, actor_name, actor_role, action, entity_type, entity_id, summary, details)
+    values (v_staff.id, v_staff.email, v_staff.full_name, coalesce(v_staff.role, 'system'),
+            v_action, v_entity, v_entity_id, v_summary, v_details);
+  exception when others then
+    null;
+  end;
+
+  if TG_OP = 'DELETE' then
+    return OLD;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists audit_students on public.students;
+create trigger audit_students
+  after insert or update or delete on public.students
+  for each row execute function public.audit_trigger();
+
+drop trigger if exists audit_staff on public.staff_profiles;
+create trigger audit_staff
+  after insert or update or delete on public.staff_profiles
+  for each row execute function public.audit_trigger();
+
+drop trigger if exists audit_marks on public.attendance_marks;
+create trigger audit_marks
+  after insert or update or delete on public.attendance_marks
+  for each row execute function public.audit_trigger();
+
+drop trigger if exists audit_grade_settings on public.grade_settings;
+create trigger audit_grade_settings
+  after insert or update or delete on public.grade_settings
+  for each row execute function public.audit_trigger();
 
 -- ── Bootstrap the first admin ────────────────────────────────────────
 -- Chicken and egg: adding staff now needs an admin, so the very first one is
@@ -825,6 +1030,29 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'attendance_marks'
   ) then
     alter publication supabase_realtime add table public.attendance_marks;
+  end if;
+end
+$$;
+
+-- The audit trail and staff usage time feed the admin Audit Log page live.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'audit_logs'
+  ) then
+    alter publication supabase_realtime add table public.audit_logs;
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'staff_time_logs'
+  ) then
+    alter publication supabase_realtime add table public.staff_time_logs;
   end if;
 end
 $$;

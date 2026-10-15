@@ -140,6 +140,18 @@ export const api = {
       .select()
       .single()
     if (error) throw new Error(error.message)
+    // Manual marks are staff actions (the scanner writes the rest), so leave
+    // an explicit trail. Never blocks the mark itself.
+    supabase
+      .rpc('log_audit', {
+        p_action: 'mark',
+        p_entity_type: 'attendance_logs',
+        p_summary: `Marked attendance ${status}`,
+        p_entity_id: String(studentId),
+        p_details: { status, log_id: data.id },
+      })
+      .then(() => {})
+      .catch(() => {})
     return data
   },
 
@@ -305,6 +317,50 @@ export const api = {
     return data
   },
 
+  /** Explicit audit event (e.g. sign-in). CRUD itself is trailed by DB triggers. */
+  async logAudit(action, entityType, summary, entityId = null, details = {}) {
+    if (!isLive) return demo.logAudit(action, entityType, summary, entityId, details)
+    const { data, error } = await supabase.rpc('log_audit', {
+      p_action: action,
+      p_entity_type: entityType,
+      p_summary: summary,
+      p_entity_id: entityId ? String(entityId) : null,
+      p_details: details ?? {},
+    })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  /** Admin view: staff change history, newest first. */
+  async listAuditLogs(limit = 500) {
+    if (!isLive) return demo.listAuditLogs(limit)
+    return unwrap(
+      supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(limit),
+    )
+  },
+
+  /** Admin view: everyone's clock-in/out rows, newest first. */
+  async listStaffTimeLogs(limit = 1000) {
+    if (!isLive) return demo.listStaffTimeLogs()
+    // The embedded join needs the FK; fall back to plain rows and join to
+    // the staff list client-side if it is missing.
+    const attempt = await supabase
+      .from('staff_time_logs')
+      .select('*, staff:staff_profiles!staff_time_logs_staff_id_fkey(id, full_name, email, role)')
+      .order('work_date', { ascending: false })
+      .order('time_in', { ascending: false })
+      .limit(limit)
+    if (!attempt.error) return attempt.data
+    return unwrap(
+      supabase
+        .from('staff_time_logs')
+        .select('*')
+        .order('work_date', { ascending: false })
+        .order('time_in', { ascending: false })
+        .limit(limit),
+    )
+  },
+
   /** Claims an admin row for the account that just registered. */
   async claimAdminProfile(fullName) {
     if (!isLive)
@@ -402,6 +458,8 @@ export const api = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_profiles' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_marks' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_time_logs' }, onChange)
       .subscribe()
     return () => supabase.removeChannel(channel)
   },

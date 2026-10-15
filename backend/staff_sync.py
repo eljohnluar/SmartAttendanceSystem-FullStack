@@ -10,14 +10,26 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 
-# Ambiguous glyphs (0/O, 1/l/I) left out so a password survives being read aloud.
-ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# Same policy as frontend/src/lib/password.js: 8–14 characters with a
+# letter, a digit, and a special character. Ambiguous glyphs (0/O, 1/l/I)
+# left out so a password survives being read aloud.
+LETTERS = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ"
+DIGITS = "23456789"
+SPECIALS = "!@#$%^&*-_+=?"
 
 _warned = False
 
 
-def new_password() -> str:
-    return "".join(secrets.choice(ALPHABET) for _ in range(12))
+def new_password(length: int = 12) -> str:
+    alphabet = LETTERS + DIGITS + SPECIALS
+    chars = [
+        secrets.choice(LETTERS),
+        secrets.choice(DIGITS),
+        secrets.choice(SPECIALS),
+    ]
+    chars += [secrets.choice(alphabet) for _ in range(length - 3)]
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 def _now() -> str:

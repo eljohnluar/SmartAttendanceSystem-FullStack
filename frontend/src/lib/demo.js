@@ -71,6 +71,7 @@ function createStore() {
         parsed.grade_settings = parsed.grade_settings ?? []
         parsed.marks = parsed.marks ?? []
         parsed.timeLogs = parsed.timeLogs ?? []
+        parsed.auditLogs = parsed.auditLogs ?? []
         return parsed
       }
     } catch {
@@ -85,6 +86,7 @@ function createStore() {
       grade_settings: [],
       marks: [],
       timeLogs: [],
+      auditLogs: [],
     }
     localStorage.setItem(KEY, JSON.stringify(created))
     return created
@@ -99,6 +101,39 @@ function createStore() {
   function withStudent(log) {
     const student = state.students.find((s) => s.id === log.student_id) || null
     return { ...log, students: student }
+  }
+
+  function currentActor() {
+    try {
+      return (
+        state.staff.find((row) => row.role === demoRole()) ??
+        state.staff.find((row) => row.role === 'admin') ??
+        state.staff[0] ??
+        null
+      )
+    } catch {
+      return state.staff[0] ?? null
+    }
+  }
+
+  function recordAudit(action, entityType, summary, entityId = null, details = {}) {
+    state.auditLogs = state.auditLogs ?? []
+    const actor = currentActor()
+    const row = {
+      id: `audit-${crypto.randomUUID()}`,
+      actor_id: actor?.id ?? null,
+      actor_email: actor?.email ?? 'demo@school.example',
+      actor_name: actor?.full_name ?? 'Demo User',
+      actor_role: actor?.role ?? demoRole(),
+      action,
+      entity_type: entityType,
+      entity_id: entityId ? String(entityId) : null,
+      summary,
+      details: details ?? {},
+      created_at: new Date().toISOString(),
+    }
+    state.auditLogs.push(row)
+    return row
   }
 
   if (state.students.length === 0) {
@@ -159,6 +194,13 @@ function createStore() {
         ...input,
       }
       state.students.push(student)
+      recordAudit(
+        'create',
+        'students',
+        `create student ${student.first_name ?? ''} ${student.last_name ?? ''} (${student.grade_level ?? 'no grade'})`.trim(),
+        student.id,
+        { new: student },
+      )
       save()
       return student
     },
@@ -174,14 +216,34 @@ function createStore() {
       if (number && state.students.some((s) => s.id !== id && (s.student_number ?? '').trim() === number)) {
         throw new Error(`Student ID ${number} is already taken.`)
       }
+      const before = state.students.find((student) => student.id === id)
       state.students = state.students.map((student) =>
         student.id === id ? { ...student, ...changes } : student,
       )
+      if (before) {
+        recordAudit(
+          'update',
+          'students',
+          `update student ${before.first_name ?? ''} ${before.last_name ?? ''}`.trim(),
+          id,
+          { old: before, new: { ...before, ...changes } },
+        )
+      }
       save()
     },
     async removeStudent(id) {
+      const before = state.students.find((student) => student.id === id)
       state.students = state.students.filter((student) => student.id !== id)
       state.logs = state.logs.filter((log) => log.student_id !== id)
+      if (before) {
+        recordAudit(
+          'delete',
+          'students',
+          `delete student ${before.first_name ?? ''} ${before.last_name ?? ''}`.trim(),
+          id,
+          { old: before },
+        )
+      }
       save()
     },
     async listAttendance(sinceIso) {
@@ -230,6 +292,10 @@ function createStore() {
       state.grade_settings = existing
         ? state.grade_settings.map((r) => (r.grade_level === grade ? row : r))
         : [...state.grade_settings, row]
+      recordAudit(existing ? 'update' : 'create', 'grade_settings', `${existing ? 'update' : 'create'} late rule for ${grade}`, grade, {
+        old: existing ?? null,
+        new: row,
+      })
       save()
       return row
     },
@@ -239,6 +305,7 @@ function createStore() {
     },
     async saveMark(studentId, status) {
       const today = todayStamp()
+      const student = state.students.find((s) => s.id === studentId)
       const existing = state.marks.find((m) => m.student_id === studentId && m.mark_date === today)
       if (existing) {
         existing.status = status
@@ -252,11 +319,19 @@ function createStore() {
           updated_at: new Date().toISOString(),
         })
       }
+      recordAudit(
+        'mark',
+        'attendance_marks',
+        `Marked ${student ? `${student.first_name ?? ''} ${student.last_name ?? ''}`.trim() : studentId} ${status}`,
+        studentId,
+        { status },
+      )
       save()
     },
     async clearMark(studentId) {
       const today = todayStamp()
       state.marks = state.marks.filter((m) => !(m.student_id === studentId && m.mark_date === today))
+      recordAudit('mark', 'attendance_marks', `Cleared manual mark for ${studentId}`, studentId, { cleared: true })
       save()
     },
     async resetAttendance(grade, sinceIso) {
@@ -265,8 +340,13 @@ function createStore() {
       )
       const before = state.logs.length
       state.logs = state.logs.filter((log) => !(inGrade.has(log.student_id) && log.scan_time >= sinceIso))
+      const cleared = before - state.logs.length
+      recordAudit('reset', 'attendance_logs', `Cleared ${cleared} scan(s) for ${grade}`, null, {
+        grade,
+        cleared,
+      })
       save()
-      return before - state.logs.length
+      return cleared
     },
     /** Mirrors what backend/service.py does on a real scan. */
     async simulateScan(fingerprintId) {
@@ -316,15 +396,25 @@ function createStore() {
         ...rest,
       }
       state.staff.push(row)
+      recordAudit('create', 'staff_profiles', `create staff ${row.email}`, row.id, { new: row })
       save()
       return row
     },
     async updateStaff(id, changes) {
+      const before = state.staff.find((row) => row.id === id)
       state.staff = state.staff.map((row) => (row.id === id ? { ...row, ...changes } : row))
+      recordAudit('update', 'staff_profiles', `update staff ${before?.email ?? id}`, id, {
+        old: before ?? null,
+        new: changes,
+      })
       save()
     },
     async removeStaff(id) {
+      const before = state.staff.find((row) => row.id === id)
       state.staff = state.staff.filter((row) => row.id !== id)
+      if (before) {
+        recordAudit('delete', 'staff_profiles', `delete staff ${before.email}`, id, { old: before })
+      }
       save()
     },
     async timeIn() {
@@ -347,6 +437,7 @@ function createStore() {
       }
       state.timeLogs = state.timeLogs ?? []
       state.timeLogs.push(row)
+      recordAudit('time_in', 'staff_time_logs', `${me.full_name} clocked in`, row.id, { work_date: today })
       save()
       return row
     },
@@ -363,6 +454,7 @@ function createStore() {
       if (!row) return null
       row.time_out = new Date().toISOString()
       row.updated_at = new Date().toISOString()
+      recordAudit('time_out', 'staff_time_logs', `${me.full_name} clocked out`, row.id, { work_date: today })
       save()
       return row
     },
@@ -380,8 +472,50 @@ function createStore() {
       if (!row) throw new Error('Staff member not found.')
       row.max_session_hours = hours
       row.updated_at = new Date().toISOString()
+      recordAudit('session_hours', 'staff_profiles', `Set session hours to ${hours} for ${row.email}`, staffId, {
+        hours,
+      })
       save()
       return row
+    },
+    async listAuditLogs(limit = 500) {
+      state.auditLogs = state.auditLogs ?? []
+      return [...state.auditLogs]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, limit)
+    },
+    async listStaffTimeLogs() {
+      state.timeLogs = state.timeLogs ?? []
+      return [...state.timeLogs].sort((a, b) =>
+        `${b.work_date} ${b.time_in ?? ''}`.localeCompare(`${a.work_date} ${a.time_in ?? ''}`),
+      )
+    },
+    async logAudit(action, entityType, summary, entityId = null, details = {}) {
+      const row = recordAudit(action, entityType, summary, entityId, details)
+      save()
+      return row
+    },
+    async insertAttendance(input) {
+      const student = state.students.find((s) => s.id === input.student_id)
+      const log = {
+        id: `log-${state.nextLogId++}`,
+        student_id: input.student_id,
+        scan_time: input.scan_time ?? new Date().toISOString(),
+        status: input.status ?? 'Present',
+        parent_notified: input.parent_notified ?? false,
+      }
+      state.logs.push(log)
+      if (student) {
+        recordAudit(
+          'mark',
+          'attendance_logs',
+          `Marked ${student.first_name ?? ''} ${student.last_name ?? ''} ${log.status}`.trim(),
+          student.id,
+          { status: log.status },
+        )
+      }
+      save()
+      return withStudent(log)
     },
     /** Stands in for the USB scanner: three presses of one finger, then a merge. */
     startCapture(requestedId) {

@@ -3,17 +3,10 @@ import { api } from '../../lib/api.js'
 import { GradeFields } from '../../components/GradeFields.jsx'
 import { SectionFields, cleanSections, knownSections } from '../../components/SectionFields.jsx'
 import { cleanGrades } from '../../lib/grades.js'
+import { generatePassword, passwordError } from '../../lib/password.js'
 import { useApp } from '../../lib/useApp.js'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-// Same alphabet the Python service uses: no 0/O or 1/l/I, so a password
-// survives being read to someone over the phone.
-const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-
-function generatePassword() {
-  const bytes = crypto.getRandomValues(new Uint8Array(12))
-  return [...bytes].map((byte) => ALPHABET[byte % ALPHABET.length]).join('')
-}
 
 const EMPTY = () => ({ full_name: '', email: '', role: 'teacher', grades: [], sections: [], temp_password: generatePassword(), max_session_hours: 8 })
 
@@ -52,8 +45,9 @@ export default function AddStaff() {
     if (!EMAIL_PATTERN.test(email)) return setError('Enter a valid email address.')
     if (isTeacher && grades.length === 0) return setError('Choose at least one grade for a professor.')
     const password = form.temp_password.trim()
-    if (password && password.length < 8) {
-      return setError('Use at least 8 characters, or leave it blank to auto-generate.')
+    if (password) {
+      const problem = passwordError(password)
+      if (problem) return setError(`${problem} Or leave it blank to auto-generate.`)
     }
 
     setBusy(true)
@@ -179,8 +173,9 @@ export default function AddStaff() {
               </button>
             </div>
             <span className="hint">
-              Shown as plain text because you hand it over once. Leave blank and the Python service
-              invents one instead.
+              Shown as plain text because you hand it over once. Use 8–14 characters with
+              letters, numbers, and a special character — or leave blank and the Python
+              service invents one instead.
             </span>
           </div>
 

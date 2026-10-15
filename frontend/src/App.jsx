@@ -8,6 +8,7 @@ import Kiosk from './pages/Kiosk.jsx'
 import Login from './pages/Login.jsx'
 import Register from './pages/Register.jsx'
 import AddStaff from './pages/admin/AddStaff.jsx'
+import AuditLog from './pages/admin/AuditLog.jsx'
 import Reports from './pages/admin/Reports.jsx'
 import StudentManagement from './pages/admin/StudentManagement.jsx'
 import TeacherManagement from './pages/admin/TeacherManagement.jsx'
@@ -31,6 +32,7 @@ const ROUTES = [
   { path: 'students', label: 'My Students', View: Students, roles: ['teacher'] },
   { path: 'attendance', label: 'Attendance', View: Attendance, roles: STAFF },
   { path: 'reports', label: 'Reports', View: Reports, roles: ADMIN },
+  { path: 'audit', label: 'Audit Log', View: AuditLog, roles: ADMIN },
   { path: 'my-reports', label: 'Reports', View: TeacherReports, roles: ['teacher'] },
   { path: 'profile', label: 'My Profile', View: MyProfile, roles: ['teacher'] },
   { path: 'register', label: 'Register', View: Register, roles: ['public'], hidden: true },
