@@ -1,29 +1,18 @@
-"""Data access for Supabase (PostgREST) with a file-backed stand-in for demo runs.
+"""Data access for Supabase (PostgREST).
 
 Talks to PostgREST over httpx rather than supabase-py: the dependency is far
 lighter and the REST calls are the same ones the client library makes.
+
+This is the cloud half of the pairing; the scanner's own data lives in SQLite
+(database.py) and worker.py mirrors one into the other when the network is up.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
-
-DEMO_FILE = Path(__file__).resolve().parent / "demo_data.json"
-
-SEED_STUDENTS = [
-    {"fingerprint_id": 1, "first_name": "Amara", "last_name": "Okafor", "grade_level": "Grade 5", "parent_email": "parent.amara@example.com"},
-    {"fingerprint_id": 2, "first_name": "Daniel", "last_name": "Reyes", "grade_level": "Grade 6", "parent_email": "parent.daniel@example.com"},
-    {"fingerprint_id": 3, "first_name": "Mei", "last_name": "Tan", "grade_level": "Grade 5", "parent_email": "parent.mei@example.com"},
-]
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SupabaseStore:
@@ -137,6 +126,9 @@ class SupabaseStore:
         ).json()
         return rows[0] if rows else None
 
+    def list_grade_settings(self) -> list[dict]:
+        return self._request("GET", "grade_settings", params={"select": "*"}).json()
+
     def save_status(self, status: dict) -> None:
         self._request(
             "POST",
@@ -203,123 +195,3 @@ class SupabaseStore:
 
     def close(self) -> None:
         self._client.close()
-
-
-class LocalStore:
-    """JSON-file store so the pipeline is runnable before Supabase exists."""
-
-    name = "local"
-
-    def __init__(self, path: Path = DEMO_FILE) -> None:
-        self._path = path
-        self._data = {
-            "students": [],
-            "attendance_logs": [],
-            "backend_status": {},
-            "staff_profiles": [],
-            "grade_settings": [],
-        }
-        if path.exists():
-            self._data.update(json.loads(path.read_text(encoding="utf-8")))
-        if not self._data["students"]:
-            for seed in SEED_STUDENTS:
-                self.insert_student(seed)
-
-    def _save(self) -> None:
-        self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
-
-    def get_student(self, fingerprint_id: int) -> dict | None:
-        wanted = int(fingerprint_id)
-        return next((s for s in self._data["students"] if s["fingerprint_id"] == wanted), None)
-
-    def list_students(self) -> list[dict]:
-        return sorted(self._data["students"], key=lambda s: s["fingerprint_id"])
-
-    def roster(self) -> list[dict]:
-        return self.list_students()
-
-    def save_template(self, fingerprint_id: int, template_b64: str) -> int:
-        return self._set_template(fingerprint_id, template_b64)
-
-    def clear_template(self, fingerprint_id: int) -> int:
-        return self._set_template(fingerprint_id, None)
-
-    def _set_template(self, fingerprint_id: int, template_b64: str | None) -> int:
-        changed = 0
-        for row in self._data["students"]:
-            if row["fingerprint_id"] == int(fingerprint_id):
-                row["fingerprint_template"] = template_b64
-                changed += 1
-        if changed:
-            self._save()
-        return changed
-
-    def insert_student(self, student: dict) -> dict:
-        row = {
-            "id": student.get("id") or f"local-{len(self._data['students']) + 1}",
-            "created_at": _now_iso(),
-            **student,
-        }
-        row["fingerprint_id"] = int(row["fingerprint_id"])
-        self._data["students"] = [
-            s for s in self._data["students"] if s["fingerprint_id"] != row["fingerprint_id"]
-        ]
-        self._data["students"].append(row)
-        self._save()
-        return row
-
-    def insert_attendance(self, log: dict) -> dict:
-        row = {"id": f"log-{len(self._data['attendance_logs']) + 1}", **log}
-        self._data["attendance_logs"].append(row)
-        self._save()
-        return row
-
-    def update_attendance(self, log_id: str, changes: dict) -> None:
-        for row in self._data["attendance_logs"]:
-            if row["id"] == log_id:
-                row.update(changes)
-        self._save()
-
-    def latest_scan_for_student(self, student_id: str) -> dict | None:
-        matches = [r for r in self._data["attendance_logs"] if r["student_id"] == student_id]
-        return matches[-1] if matches else None
-
-    def grade_settings(self, grade: str) -> dict | None:
-        return next((r for r in self._data["grade_settings"] if r["grade_level"] == grade), None)
-
-    def save_status(self, status: dict) -> None:
-        self._data["backend_status"] = status
-        self._save()
-
-    def list_staff(self) -> list[dict]:
-        return list(self._data.get("staff_profiles", []))
-
-    def update_staff(self, profile_id: str, changes: dict) -> None:
-        for row in self._data.get("staff_profiles", []):
-            if row["id"] == profile_id:
-                row.update(changes)
-        self._save()
-
-    def next_capture(self):
-        return None
-
-    def update_capture(self, capture_id: str, changes: dict) -> None:
-        pass
-
-    def prune_captures(self, older_than_minutes: int = 60) -> None:
-        pass
-
-    def create_auth_user(self, email: str, password: str, role: str, grade_level) -> dict:
-        raise RuntimeError("Local demo store cannot create Supabase logins.")
-
-    def ping(self) -> bool:
-        return True
-
-    def close(self) -> None:
-        pass
-
-
-def build_store(settings) -> SupabaseStore | LocalStore:
-    if settings.has_database:
-        return SupabaseStore(settings.supabase_url, settings.supabase_key)
-    return LocalStore()

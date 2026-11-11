@@ -291,22 +291,6 @@ code {
   color: #ffffff;
 }
 
-.kiosk-bare .demo-bar {
-  background: #1d2025;
-  border-color: #2c3138;
-  color: #b6bcc3;
-}
-
-.kiosk-bare .demo-bar input {
-  background: #14161a;
-  border-color: #2c3138;
-  color: #ffffff;
-}
-
-.kiosk-bare .demo-error {
-  color: #f28b82;
-}
-
 .kiosk-bare .kiosk {
   min-height: 100vh;
 }
@@ -323,36 +307,6 @@ code {
 .kiosk-signin:hover {
   color: var(--ink);
   text-decoration: underline;
-}
-
-.mode-tag {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-
-.topbar .mode-tag {
-  color: #8b929b;
-}
-
-.topbar .pill {
-  color: #e8eaed;
-  border-color: #2c3138;
-}
-
-.topbar .pill-online {
-  color: #7ddba3;
-  border-color: #1f4b38;
-}
-
-.topbar .pill-stale .pill-dot,
-.topbar .pill-demo .pill-dot {
-  background: #d99a2b;
-}
-
-.topbar .pill-offline .pill-dot {
-  background: #f28b82;
 }
 
 .main {
@@ -373,32 +327,6 @@ code {
   border-radius: 999px;
   padding: 4px 11px 4px 9px;
   white-space: nowrap;
-}
-
-.pill-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-faint);
-}
-
-.pill-online .pill-dot {
-  background: var(--present);
-  box-shadow: 0 0 0 3px var(--present-soft);
-}
-
-.pill-online {
-  color: var(--present);
-  border-color: #cbe6d6;
-}
-
-.pill-stale .pill-dot,
-.pill-demo .pill-dot {
-  background: var(--late);
-}
-
-.pill-offline .pill-dot {
-  background: var(--danger);
 }
 
 .badge {
@@ -592,6 +520,14 @@ select:disabled {
 
 .modal {
   width: min(440px, 100%);
+  /* Without a cap the modal grows past short viewports and the save button
+     sits off-screen with no way to scroll — the "Add student does nothing"
+     bug on the small school laptop. */
+  max-height: 88vh;
+  max-height: 88dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -604,6 +540,7 @@ select:disabled {
 }
 
 .modal-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -638,6 +575,7 @@ select:disabled {
   flex-direction: column;
   gap: 12px;
   padding: 18px;
+  overflow-y: auto;
 }
 
 .modal-body .alert {
@@ -649,6 +587,7 @@ select:disabled {
 }
 
 .modal-foot {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   padding: 0 18px 18px;
@@ -1131,36 +1070,7 @@ select:disabled {
   font-size: 13px;
 }
 
-.demo-bar {
-  position: absolute;
-  bottom: 26px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--ink-faint);
-  background: var(--surface-soft);
-  border: 1px dashed var(--line-strong);
-  border-radius: 999px;
-  padding: 8px 10px 8px 18px;
-}
-
-.demo-bar label {
-  white-space: nowrap;
-}
-
-.demo-bar input {
-  width: 54px;
-  padding: 6px 8px;
-  text-align: center;
-  font-size: 14px;
-}
-
-.demo-error {
-  color: var(--danger);
-}
-
-/* ── Dashboard ──────────────────────────────────────────── */
+/* ── Dashboard ─────────────────────────────────────────── */
 .btn-danger {
   background: transparent;
   color: var(--danger);
@@ -1315,6 +1225,30 @@ select:disabled {
   .profile-list > div {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+
+  /* Two columns of inputs stop being two columns when each is 150px wide. */
+  .form {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .page {
+    padding: 24px 14px 48px;
+  }
+
+  /* Wide roster tables scroll sideways instead of overflowing. */
+  table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
   }
 }
 
@@ -1493,15 +1427,6 @@ td em {
 
 .login-card .alert {
   grid-column: unset;
-}
-
-/* The sign-in code: large, centred, and impossible to misread. */
-.otp-input {
-  font-size: 30px;
-  letter-spacing: 0.42em;
-  text-align: center;
-  font-family: var(--mono);
-  padding: 14px 8px 14px 18px;
 }
 
 .login-alt {
@@ -1979,35 +1904,6 @@ td select {
 .expand-caret {
   font-size: 10px;
   color: var(--ink-faint);
-}
-
-/* ── Password confirmation step in StudentForm ───────────── */
-.password-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  animation: fade 0.2s ease both;
-}
-
-.password-confirm-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.password-confirm-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  flex: none;
 }
 
 /* ── Printing a roster or a day's attendance ───────────────────────── */

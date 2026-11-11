@@ -4,3 +4,7 @@ venv/
 __pycache__/
 *.pyc
 demo_data.json
+# PyInstaller output: the exe holds the hardcoded Brevo key. Never commit it.
+dist/
+build/
+SmartAttendance.spec

@@ -69,8 +69,8 @@ export default function Register() {
     setBusy(true)
     try {
       const { needsConfirmation } = await registerOrSignIn(address, password, fullName.trim())
-      // The admin row is claimed after the first verified sign-in, because
-      // nothing can be written to it before the code step is done.
+      // The admin row is claimed on the first sign-in, so nothing here has to
+      // wait for it.
       setConfirmed(!needsConfirmation)
       setDone(true)
     } catch (registerError) {
@@ -158,7 +158,7 @@ export default function Register() {
         </button>
 
         <p className="hint">
-          We email a link to confirm the address first, then a 6-digit code each time you sign in.
+          We email a link to confirm the address first. After that, sign in with this password.
         </p>
 
         <div className="login-alt">

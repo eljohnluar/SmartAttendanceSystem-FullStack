@@ -12,6 +12,7 @@ needed — every path serves index.html's own file, and unknown ones 404.
 
 from __future__ import annotations
 
+import sys
 import threading
 import webbrowser
 from functools import partial
@@ -19,7 +20,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from os import getenv
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+EXE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
 DEFAULT_PORT = 8766
 
 
@@ -27,15 +29,18 @@ def _find_dist() -> Path:
     """The built app, in whichever layout this machine is using.
 
     In the repository it sits beside the backend; once installed it is a `web`
-    folder next to it. WEB_DIST overrides both for a non-standard location.
+    folder next to the script (or, for the PyInstaller exe, next to the exe).
+    WEB_DIST overrides all of them for a non-standard location.
     """
     override = (getenv("WEB_DIST") or "").strip()
     if override:
         return Path(override)
-    for candidate in (BASE_DIR.parent / "frontend" / "dist", BASE_DIR.parent / "web"):
+    candidates = [EXE_DIR / "web"] if EXE_DIR else []
+    candidates += [BASE_DIR.parent / "frontend" / "dist", BASE_DIR.parent / "web", BASE_DIR / "web"]
+    for candidate in candidates:
         if (candidate / "index.html").exists():
             return candidate
-    return BASE_DIR.parent / "frontend" / "dist"
+    return EXE_DIR / "web" if EXE_DIR else BASE_DIR.parent / "frontend" / "dist"
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):

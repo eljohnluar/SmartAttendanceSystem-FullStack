@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { latestByStudent, markFor, summarize } from '../lib/attendance.js'
-import { Avatar, StatusPill } from '../components/ui.jsx'
+import { Avatar } from '../components/ui.jsx'
 import { formatDateLong, formatTime, fullName, studentFor } from '../lib/format.js'
 import { useApp } from '../lib/useApp.js'
 
@@ -269,7 +269,7 @@ function LateRule({ students, logs }) {
 }
 
 export default function Dashboard() {
-  const { students, logs, marks, backend, access, staff, grades, refresh } = useApp()
+  const { students, logs, marks, access, staff, grades, refresh } = useApp()
   const [query, setQuery] = useState('')
   const needle = query.trim().toLowerCase()
 
@@ -341,7 +341,6 @@ export default function Dashboard() {
               {staff?.sections?.length ? ` · ${staff.sections.join(', ')}` : ''} only
             </span>
           )}
-          <StatusPill backend={backend} />
           <button type="button" className="btn btn-quiet" onClick={() => window.print()}>
             Print
           </button>

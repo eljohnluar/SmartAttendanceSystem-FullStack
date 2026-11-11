@@ -1,12 +1,15 @@
 # Shipping Smart Attendance to another computer
 
 One file does the job: `Output\SmartAttendance-1.0.0-Setup.exe`. It carries the
-service, its own copy of Python, the built web app, and your `backend\.env`
-keys, so the other machine needs no Node, no pip and no Python installed.
+one-file backend (`SmartAttendance.exe` — Python and all its code packed inside,
+no black console window), the built web app, the ZKFinger SDK driver installer,
+and your `backend\.env`, so the other machine needs no Node, no pip and no
+Python installed. The setup asks for **no password**.
 
-The setup itself is encrypted. Whoever installs it types the password you chose
-when building it, and without that password the files inside — including your
-keys — cannot be read.
+Heads-up that replaces the old password: the Brevo email key is baked into the
+exe, and the `.env` inside the setup still holds the Supabase service-role key.
+Anyone who gets a copy of the Setup file can extract both, so treat the file
+like a house key: USB stick or direct hand-off, never a shared link.
 
 ---
 
@@ -26,55 +29,39 @@ keys — cannot be read.
    powershell -ExecutionPolicy Bypass -File .\build.ps1
    ```
 
-   It asks for a password twice. Pick one you will remember or write down — you
-   type it on the *other* machine during install. It then downloads a small
-   embeddable Python (cached in `vendor\`), installs `httpx` and
-   `python-dotenv` into it, stages everything under `build\`, and compiles.
+   It runs PyInstaller over `backend\main.py` (one-file, no console window),
+   stages the exe, the web app, `schema.sql`, your `.env` and the SDK setup
+   under `build\`, then compiles. No prompts.
 
 3. Finish with a line like `>> Ready: ...\Output\SmartAttendance-1.0.0-Setup.exe`.
    Copy that one file to a USB stick.
 
-Prefer the Inno Setup window? It cannot ask you for a password, so give it one to
-read first: copy `password.ini.example` to `password.ini` in this folder, put
-your password on the `password=` line, save, then open `SmartAttendance.iss` and
-press **F9**. `password.ini` is git-ignored, and once `build.ps1` has run once it
-writes that file for you.
-
-The other way, if you would rather not keep it in a file, is to launch the
-compiler from PowerShell with the variable set:
+Prefer the Inno Setup window? Open `SmartAttendance.iss` and press **F9**; or
+from PowerShell:
 
 ```powershell
-$env:SETUP_PASSWORD = 'your password'
 & 'C:\Program Files\Inno Setup 7\ISCC.exe' C:\Projects\smartattendancesystem\installer\SmartAttendance.iss
 ```
-
-With neither, the compile stops on purpose rather than quietly shipping your keys
-unencrypted:
-
-> No installer password. Either run build.ps1, or copy password.ini.example to
-> password.ini in this folder and set password=your password on the second line.
-
 
 ---
 
 ## B. On the other computer: install it
 
-1. **Install the ZKFinger SDK first**, from ZKTeco, the 64-bit "ZKFinger SDK
-   (Windows Standard)". It cannot be bundled here because it installs its own
-   driver. If it is missing the installer tells you when it finishes.
-2. Double-click `SmartAttendance-...-Setup.exe`, enter the password, and accept
-   the defaults. Tick **Create a desktop shortcut** if you want one.
-3. Tick **Start the scanner service when this user signs in** only if this
-   machine is the one that will be left on at the school gate. If you do, use
-   that *instead of* the shortcut, not both — two services would fight over the
-   scanner.
-4. Plug the Live20R in and let Windows finish recognising it.
-5. Start **Smart Attendance**. A console window opens with what it found, and
-   your browser opens <http://localhost:8766>. Sign in with the same account you
-   use here.
+1. Double-click `SmartAttendance-...-Setup.exe` and accept the defaults. Leave
+   **Install the ZKFinger SDK driver** ticked — the driver ships inside this
+   setup now and installs itself silently. Tick **Create a desktop shortcut**
+   if you want one.
+2. Tick **Start the scanner service when this user signs in** only if this
+   machine is the one that will be left on at the school gate. A shortcut then
+   lands in the Startup folder and the service launches silently at sign-in.
+3. Plug the Live20R in and let Windows finish recognising it. If the SDK did
+   not install, restart the computer first.
+4. Start **Smart Attendance**. Your browser opens <http://localhost:8766>. Sign
+   in with the same account you use here.
 
-The console is worth reading once: it says which database it reached and how
-many scanners the SDK can see.
+There is no console window any more. What the service would have printed goes
+to `C:\Users\Public\SmartAttendance\service.log` — worth reading once on the new
+machine to see which database it reached and how many scanners the SDK can see.
 
 ---
 
@@ -82,22 +69,27 @@ many scanners the SDK can see.
 
 ```
 C:\Program Files\SmartAttendance\
-  runtime\python.exe        the private Python the service runs on
-  app\backend\              the service, plus your .env with the keys
-  app\web\                  the built web app the console opens
+  SmartAttendance.exe       the whole backend, Python included
+  web\                      the built web app the browser opens
+  vendor\ZKFingerSDK_setup.exe   the driver installer, kept in case of reinstall
+  .env                      Supabase mirror settings (the email key is inside the exe)
+  schema.sql               for re-running in Supabase Studio if you edit it
+C:\Users\Public\SmartAttendance\
+  attendance.db             every scan, offline first; service.log sits beside it
 ```
 
-To change a key later, edit `app\backend\.env` — Notepad has to be run **as
+To change the Supabase settings later, edit `.env` — Notepad has to be run **as
 administrator** for that folder — then restart the service.
 
 ---
 
 ## Two machines, one database
 
-Both computers talk to the same Supabase project, so a student enrolled on one
-appears on the other, and the roster is shared. The machine with the scanner
-must be running for a fingerprint to be read; any other computer only needs a
-browser pointed at *its own* copy or at the hosted one.
+Scans land in the local `attendance.db` first, so the gate keeps working with
+the internet unplugged; parent emails queue as PENDING and go out on their own
+once the network returns. When a Supabase `.env` is present, the same worker
+also mirrors scans up and pulls the roster down every 30 seconds, so a student
+enrolled on one machine works on the other after the next resync.
 
 ---
 
@@ -106,25 +98,30 @@ browser pointed at *its own* copy or at the hosted one.
 | You see | What to do |
 | --- | --- |
 | Windows says "protected your PC" | Click **More info** → **Run anyway**. It is unsigned, so this is expected. |
-| "ZKFinger SDK was not found" | Install the SDK, restart the computer, then start the service again. |
-| Console says `0 USB scanner(s) visible` | Try another USB port, and check Device Manager for the Live20R. `python app\backend\main.py --probe 30` watches it answer presses. |
+| "The ZKFinger SDK driver is still not on this computer" | Run `C:\Program Files\SmartAttendance\vendor\ZKFingerSDK_setup.exe` by hand, restart, then start the service. |
+| `service.log` says `0 USB scanner(s) visible` | Try another USB port, and check Device Manager for the Live20R. |
 | Browser opens a blank page | The web app was not staged. Run `npm run build` in `frontend`, then rebuild the installer. |
-| Antivirus deleted `python.exe` | Restore it and exclude `C:\Program Files\SmartAttendance`. |
-| Port 8766 is taken | Set `WEB_PORT` in `app\backend\.env` and restart. |
-| A reinstall asks for a password you no longer have | There is no recovery; build a new installer with a password you keep. |
+| Antivirus deleted `SmartAttendance.exe` | Restore it and exclude `C:\Program Files\SmartAttendance`. PyInstaller exes are frequent false positives. |
+| Port 8766 is taken | Set `WEB_PORT` in `.env` and restart. |
+| Parent emails do not arrive | `service.log` shows what the queue is doing; check `--status` output in the same log. |
+
+To ask the exe how it is configured without starting the scanner loop, run
+`SmartAttendance.exe --status` from PowerShell and read the fresh lines in
+`service.log`.
 
 ---
 
 ## About the keys you are shipping
 
 The service-role key in `.env` can read and write every row in the database,
-past all the role rules. The installer password keeps casual copying out, but
-anyone who has both the file and the password holds full access. So:
+past all the role rules, and the Brevo key sits inside the exe. So:
 
 - Do not email the setup file around, and do not leave it on a shared drive.
 - If it goes missing, rotate both keys: Supabase **Project Settings → API** for
-  the service-role key, and Brevo **SMTP & API** for the email key. Then rebuild.
+  the service-role key, and Brevo **SMTP & API** for the email key — then
+  rebuild the installer so the new Brevo key is baked in.
 - `installer\build\` keeps a working copy of your `.env` while you build. It is
-  git-ignored; leave it that way.
+  git-ignored; leave it that way. `backend\dist\` holds the exe, and it is
+  git-ignored for the same reason.
 - Inno Setup's compiler banner reads "Non-commercial use only" — check its
   licence terms before selling copies of this.

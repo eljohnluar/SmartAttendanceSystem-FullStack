@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { Avatar, Badge } from '../components/ui.jsx'
 import { formatTime, fullName } from '../lib/format.js'
-import { useApp } from '../lib/useApp.js'
 
 const DWELL_MS = 5000
 // The signed-out kiosk has no realtime role, so polling is its only feed;
@@ -11,12 +10,9 @@ const PULSE_MS = 1000
 const FRESH_MS = 15000
 
 export default function Kiosk() {
-  const { mode, simulateScan } = useApp()
   const [clock, setClock] = useState(() => new Date())
   const [pulse, setPulse] = useState(null)
   const [card, setCard] = useState(null)
-  const [demoId, setDemoId] = useState('1')
-  const [demoError, setDemoError] = useState('')
 
   useEffect(() => {
     const timer = setInterval(() => setClock(new Date()), 1000)
@@ -63,13 +59,6 @@ export default function Kiosk() {
     ? { first_name: row.first_name, last_name: row.last_name, grade_level: row.grade_level }
     : null
   const showStudent = Boolean(student) && clock.getTime() - card.arrivedAt < DWELL_MS
-
-  async function runDemoScan(event) {
-    event.preventDefault()
-    setDemoError('')
-    const result = await simulateScan(Number(demoId))
-    if (result?.error) setDemoError(result.error)
-  }
 
   return (
     <section className="kiosk">
@@ -123,23 +112,6 @@ export default function Kiosk() {
             <strong>{pulse?.checked_in ?? 0}</strong> checked in today
           </p>
         </div>
-      )}
-
-      {mode === 'demo' && (
-        <form className="demo-bar" onSubmit={runDemoScan}>
-          <label htmlFor="demo-fp">Simulate a scan</label>
-          <input
-            id="demo-fp"
-            inputMode="numeric"
-            value={demoId}
-            onChange={(event) => setDemoId(event.target.value)}
-            aria-label="Fingerprint ID to simulate"
-          />
-          <button type="submit" className="btn btn-ghost">
-            Scan finger
-          </button>
-          {demoError && <span className="demo-error">{demoError}</span>}
-        </form>
       )}
     </section>
   )

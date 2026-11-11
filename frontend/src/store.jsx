@@ -5,49 +5,20 @@ import { getCurrentUser, signOut as endSession, watchAuth } from './lib/auth.js'
 import { gradesOf } from './lib/grades.js'
 import { AppContext } from './lib/useApp.js'
 
-const HEARTBEAT_STALE_SECONDS = 20
 // Backstop for changes the realtime socket silently misses; half the backend's
 // 5s heartbeat so even a dead socket lags by at most a couple of seconds.
 const STATUS_POLL_MS = 2500
-
-function describeBackend(status) {
-  if (status?.connected) {
-    const beat = status.last_heartbeat ? new Date(status.last_heartbeat).getTime() : 0
-    const fresh = Date.now() - beat < HEARTBEAT_STALE_SECONDS * 1000
-    return {
-      state: fresh ? 'online' : 'stale',
-      label: fresh ? 'Scanner connected' : 'Scanner silent',
-      detail: status.message || status.port || '',
-    }
-  }
-  if (mode === 'demo') {
-    return {
-      state: 'demo',
-      label: 'Demo mode',
-      detail: 'Simulated scans only — add Supabase keys and start the Python backend to go live',
-    }
-  }
-  return {
-    state: 'offline',
-    label: 'Backend offline',
-    detail: status?.message || 'Python service is not reporting',
-  }
-}
 
 export function AppProvider({ children }) {
   const [students, setStudents] = useState([])
   const [logs, setLogs] = useState([])
   const [marks, setMarks] = useState([])
-  const [backend, setBackend] = useState(() => describeBackend(null))
   const [user, setUser] = useState(null)
   const [staff, setStaff] = useState(null)
   const [team, setTeam] = useState([])
   const [registrationOpen, setRegistrationOpen] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [timeRemaining, setTimeRemaining] = useState(null)
-  // A signed-in session that has not proved the emailed code yet. Everything
-  // reads as empty until it does, because row-level security says so.
-  const [needsOtp, setNeedsOtp] = useState(false)
   // Why a registered admin could not be added to the staff list, if that failed.
   const [claimError, setClaimError] = useState('')
   const claimTriedFor = useRef(null)
@@ -93,24 +64,13 @@ export function AppProvider({ children }) {
     const open = await api.registrationOpen().catch(() => null)
     setRegistrationOpen(open)
     const signedIn = await getCurrentUser()
-    // Asked first and independently of the staff row: an unverified session
-    // cannot read staff_profiles at all, so `me` would be null either way.
-    const verified = await api.loginVerified().catch(() => true)
-    // Only a session can owe a code. login_ok() answers false for a signed-out
-    // visitor because there is nobody to answer for, not because a code is
-    // waiting, and taking that at face value used to throw every visitor
-    // straight at the code screen — including the sign-out below, whose own
-    // reset this call finishes after.
-    const owesCode = Boolean(signedIn) && !verified
     try {
       const me = (await api.myStaffProfile()) || (await claimAdminRow(signedIn, open))
       setStaff(me ?? null)
       setTeam(me?.role === 'admin' ? ((await api.listStaff()) ?? []) : [])
-      setNeedsOtp(owesCode)
     } catch {
       setStaff(null)
       setTeam([])
-      setNeedsOtp(owesCode)
     }
   }, [claimAdminRow])
 
@@ -124,14 +84,9 @@ export function AppProvider({ children }) {
   }, [refresh, refreshStaff])
 
   useEffect(() => {
-    const poll = async () => setBackend(describeBackend(await api.getStatus().catch(() => null)))
-    poll()
     // Realtime is the fast path; this reconciles anything it silently missed —
     // a dropped socket, a backgrounded tab, a laptop that fell asleep.
-    const timer = setInterval(() => {
-      poll()
-      refresh()
-    }, STATUS_POLL_MS)
+    const timer = setInterval(refresh, STATUS_POLL_MS)
     return () => clearInterval(timer)
   }, [refresh])
 
@@ -225,16 +180,14 @@ export function AppProvider({ children }) {
     }
   }, [timeRemaining])
 
-  // public = signed out, unverified = a session that has not proved its emailed
-  // code, pending/failed = a login with no usable staff row
+  // public = signed out, pending/failed = a login with no usable staff row
   const access = useMemo(() => {
     if (mode === 'demo') return demoRole()
     if (!user) return 'public'
-    if (needsOtp) return 'unverified'
     if (!staff) return 'pending'
     if (staff.status === 'active') return staff.role
     return staff.status
-  }, [user, staff, needsOtp])
+  }, [user, staff])
 
   const setMaxSessionHours = useCallback(
     async (staffId, hours) => {
@@ -253,7 +206,6 @@ export function AppProvider({ children }) {
       students,
       logs,
       marks,
-      backend,
       loadError,
       user,
       staff,
@@ -262,7 +214,6 @@ export function AppProvider({ children }) {
       setActiveGrade,
       team,
       access,
-      needsOtp,
       registrationOpen,
       claimError,
       timeRemaining,
@@ -270,13 +221,11 @@ export function AppProvider({ children }) {
       refreshStaff,
       signOut,
       setMaxSessionHours,
-      simulateScan: api.simulateScan,
     }),
     [
       students,
       logs,
       marks,
-      backend,
       loadError,
       user,
       staff,
@@ -284,7 +233,6 @@ export function AppProvider({ children }) {
       activeGrade,
       team,
       access,
-      needsOtp,
       registrationOpen,
       claimError,
       timeRemaining,

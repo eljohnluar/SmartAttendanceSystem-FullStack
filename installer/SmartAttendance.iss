@@ -1,14 +1,13 @@
 ; Smart Attendance — Inno Setup script.
 ;
 ; Compile it with build.ps1 (recommended), or open this file in the Inno Setup
-; Compiler and press F9 after setting the SETUP_PASSWORD environment variable.
+; Compiler and press F9. No password is needed for either:
 ;
-;   $env:SETUP_PASSWORD = 'the password the other device will type'
 ;   & 'C:\Program Files\Inno Setup 7\ISCC.exe' .\SmartAttendance.iss
 ;
-; The staged tree comes from prepare.ps1: runtime\ is a self-contained Python,
-; app\backend\ is the service including your .env, and app\web\ is the built
-; front end. Nothing here reads your keys; the files are only copied.
+; The staged tree comes from prepare.ps1: app\ is the one-file backend exe,
+; its .env and the built front end, and vendor\ is the ZKFinger SDK installer.
+; Nothing here reads your keys; the files are only copied.
 
 #define MyAppName "Smart Attendance"
 #ifndef MyAppVersion
@@ -18,27 +17,10 @@
 #define MyAppURL "http://localhost:8766"
 #define Staged "build"
 
-; The setup is encrypted, so the .env inside it is unreadable without this
-; password. It is never written into this file, because this file is in git. It
-; comes from one of two places:
-;
-;   1. the SETUP_PASSWORD environment variable (what build.ps1 uses), or
-;   2. installer\password.ini, which the Inno Setup Compiler window can read on
-;      its own — copy password.ini.example and fill it in.
-;
-; Without either the build stops, rather than shipping your service-role key
-; unencrypted.
-#define EnvPassword ReadEnv("SETUP_PASSWORD")
-#define IniPassword Trim(ReadIni(AddBackslash(SourcePath) + "password.ini", "setup", "password", ""))
-#if EnvPassword == ""
-  #if IniPassword == ""
-    #error No installer password. Either run build.ps1, or copy password.ini.example to password.ini in this folder and set password=your password on the second line.
-  #else
-    #define SetupPassword IniPassword
-  #endif
-#else
-  #define SetupPassword EnvPassword
-#endif
+; The setup is no longer encrypted (removed 2026-10-18 at the user's request).
+; Anyone holding SmartAttendance-...-Setup.exe can now extract the Supabase
+; service-role key from the packaged .env, and the Brevo key is already inside
+; the exe. Keep copies of the Setup file to the machines that need it.
 
 [Setup]
 AppId={{8E4C1D7A-2B5F-4C63-9A1E-5D7F0C2B8A41}
@@ -55,8 +37,6 @@ OutputBaseFilename=SmartAttendance-{#MyAppVersion}-Setup
 SetupIconFile=
 Compression=lzma2/max
 SolidCompression=yes
-Encryption=yes
-Password={#SetupPassword}
 MinVersion=10.0
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
@@ -68,7 +48,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 UsedUserAreasWarning=no
 CloseApplications=yes
 RestartApplications=no
-UninstallDisplayIcon={app}\runtime\python.exe
+UninstallDisplayIcon={app}\SmartAttendance.exe
 UninstallDisplayName={#MyAppName}
 WizardStyle=modern
 
@@ -78,35 +58,36 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 Name: "startup"; Description: "Start the scanner service when this user signs in"; GroupDescription: "Startup:"; Flags: unchecked
+Name: "sdk"; Description: "Install the ZKFinger SDK driver (needed for the fingerprint scanner)"; GroupDescription: "Components:"
 
 [Files]
-Source: "{#Staged}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Staged}\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Staged}\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The SDK installer is staged but only executed if the "sdk" task is ticked.
+Source: "{#Staged}\vendor\ZKFingerSDK_setup.exe"; DestDir: "{app}\vendor"; Flags: ignoreversion
 ; schema.sql is the one file an admin may want to re-run in Supabase Studio
 ; without opening an archive, so it is also dropped next to the shortcuts.
-Source: "{#Staged}\app\backend\schema.sql"; DestDir: "{group}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#Staged}\app\schema.sql"; DestDir: "{group}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\runtime\python.exe"; Parameters: """{app}\app\backend\main.py"" --open"; WorkingDir: "{app}"; Comment: "Runs the scanner service and opens the app"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\SmartAttendance.exe"; Parameters: "--open"; WorkingDir: "{app}"; Comment: "Runs the scanner service and opens the app"
 Name: "{group}\Open the app"; Filename: "{#MyAppURL}"; Comment: "Only works while the service is running"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\python.exe"; Parameters: """{app}\app\backend\main.py"" --open"; WorkingDir: "{app}"; Tasks: desktopicon
-
-[Registry]
-; pythonw.exe so no console window pops up at sign-in. Use this or the shortcut,
-; not both: two services would both answer the same scanner.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "SmartAttendance"; ValueData: """{app}\runtime\pythonw.exe"" ""{app}\app\backend\main.py"""; Tasks: startup; Flags: uninsdeletevalue
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\SmartAttendance.exe"; Parameters: "--open"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userstartup}\SmartAttendance"; Filename: "{app}\SmartAttendance.exe"; WorkingDir: "{app}"; Tasks: startup
+; The plan's auto-start: a shortcut dropped into the Startup folder, so the
+; console-less exe launches silently in the background every time this user
+; signs in. One mechanism only — adding a Run key too would start two
+; services that then fight over the same scanner.
 
 [Run]
-Filename: "{app}\runtime\python.exe"; Parameters: """{app}\app\backend\main.py"" --open"; WorkingDir: "{app}"; Description: "Start {#MyAppName} now"; Flags: postinstall nowait skipifsilent
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}\app\backend\__pycache__"
-Type: files; Name: "{app}\app\backend\demo_data.json"
-Type: files; Name: "{app}\app\backend\service.log"
+; The vendor SDK installs its own driver; it is itself an Inno Setup package,
+; so /VERYSILENT is its normal silent switch. Skipped when the driver is
+; already on the machine.
+Filename: "{app}\vendor\ZKFingerSDK_setup.exe"; Parameters: "/VERYSILENT /NORESTART"; StatusMsg: "Installing the ZKFinger SDK driver…"; Tasks: sdk; Check: not SdkInstalled; Flags: waituntilterminated
+Filename: "{app}\SmartAttendance.exe"; Parameters: "--open"; WorkingDir: "{app}"; Description: "Start {#MyAppName} now"; Flags: postinstall nowait skipifsilent
 
 [Code]
-// The scanner is useless without the vendor SDK, and the SDK cannot be bundled
-// here: it installs its own driver. Say so once, after the files land.
+// True when the vendor driver already sits on this machine, so the SDK setup
+// above is skipped instead of re-running over it.
 function SdkInstalled(): Boolean;
 begin
   Result :=
@@ -120,10 +101,9 @@ begin
   if SdkInstalled() then Exit;
 
   MsgBox(
-    'The ZKFinger SDK was not found on this computer.' + #13#10 + #13#10 +
-    'Install it before plugging in the Live20R, or the service will run without ' +
-    'a scanner. It comes from ZKTeco as "ZKFinger SDK (Windows Standard)"; after ' +
-    'installing it, restart this computer and check that the device appears in ' +
-    'Windows Device Manager.',
+    'The ZKFinger SDK driver is still not on this computer (the "sdk" task was' + #13#10 +
+    ' unticked, or its silent install did not take).' + #13#10 + #13#10 +
+    'Run "' + ExpandConstant('{app}\vendor\ZKFingerSDK_setup.exe') + '" by hand,' +
+    ' then restart the computer before plugging in the Live20R.',
     mbInformation, MB_OK);
 end;

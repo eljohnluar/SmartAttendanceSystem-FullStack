@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    # PyInstaller --onefile: this folder is where the exe sits, not the
+    # throwaway temp dir the bundle unpacked itself into.
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -45,6 +51,7 @@ class Settings:
     duplicate_scan_minutes: int
     heartbeat_seconds: int
     resync_seconds: int
+    emailer_seconds: int
     web_port: int
     from_override: str
 
@@ -70,7 +77,9 @@ class Settings:
         return self.email_sender_address or self.from_override or self.gmail_address
 
 
-def load_settings() -> Settings:
+def load_settings(brevo_api_key: str = "", sender_email: str = "") -> Settings:
+    """brevo_api_key / sender_email are the values hardcoded in main.py; the
+    .env still wins when filled, so development can swap providers freely."""
     return Settings(
         supabase_url=_get("SUPABASE_URL").rstrip("/"),
         supabase_key=_get("SUPABASE_SERVICE_ROLE_KEY"),
@@ -83,12 +92,13 @@ def load_settings() -> Settings:
         smtp_port=_get_int("SMTP_PORT", 465),
         email_provider=_get("EMAIL_PROVIDER", "auto").lower(),
         email_sender_name=_get("EMAIL_SENDER_NAME", "School Attendance"),
-        email_sender_address=_get("EMAIL_SENDER_ADDRESS"),
-        brevo_api_key=_get("BREVO_API_KEY"),
+        email_sender_address=_get("EMAIL_SENDER_ADDRESS") or sender_email,
+        brevo_api_key=_get("BREVO_API_KEY") or brevo_api_key,
         resend_api_key=_get("RESEND_API_KEY"),
         duplicate_scan_minutes=_get_int("DUPLICATE_SCAN_MINUTES", 45),
         heartbeat_seconds=_get_int("HEARTBEAT_SECONDS", 5),
         resync_seconds=_get_int("TEMPLATE_RESYNC_SECONDS", 60),
+        emailer_seconds=_get_int("EMAILER_SECONDS", 30),
         web_port=_get_int("WEB_PORT", 8766),
         from_override=_get("EMAIL_FROM_OVERRIDE"),
     )

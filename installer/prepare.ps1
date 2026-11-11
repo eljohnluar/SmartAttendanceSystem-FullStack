@@ -1,96 +1,87 @@
-# Builds the folder the installer ships, from this machine's source.
+# Builds everything the installer ships, from this machine's source.
 #
 #   cd C:\Projects\smartattendancesystem\installer
 #   powershell -ExecutionPolicy Bypass -File .\prepare.ps1
 #
-# It never prints your keys. It copies backend\.env into the staging folder as
-# an opaque file, and that folder is git-ignored because it now holds them.
+# It never prints your keys. The exe itself now carries the Brevo key baked
+# in (see backend\main.py), and backend\.env is copied into the staging folder
+# as an opaque file for the Supabase mirror. The build\ folder is git-ignored
+# because it holds both.
 
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$Vendor = Join-Path $PSScriptRoot 'vendor'
+$Backend = Join-Path $Root 'backend'
 $Build = Join-Path $PSScriptRoot 'build'
 $App = Join-Path $Build 'app'
-$Runtime = Join-Path $Build 'runtime'
+$Vendor = Join-Path $Build 'vendor'
 
-$PythonVersion = '3.14.3'
-$PythonAbi = '314'
-$EmbedUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
-$EmbedZip = Join-Path $Vendor "python-$PythonVersion-embed-amd64.zip"
-
-$VenvPython = Join-Path $Root 'backend\.venv\Scripts\python.exe'
+$VenvPython = Join-Path $Backend '.venv\Scripts\python.exe'
 $SystemPython = 'python'
 $PipPython = if (Test-Path $VenvPython) { $VenvPython } else { $SystemPython }
+
+$SdkSource = Get-ChildItem $Root -Directory -Filter 'ZKFinger*' |
+  ForEach-Object { Join-Path $_.FullName 'setup.exe' } |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
 
 function Step($message) { Write-Host ">> $message" -ForegroundColor Cyan }
 
 Step 'Checking what this build needs'
-foreach ($part in @('backend\main.py', 'backend\webapp.py', 'backend\.env', 'frontend\dist\index.html')) {
+foreach ($part in @('backend\main.py', 'backend\.env', 'frontend\dist\index.html')) {
   $path = Join-Path $Root $part
   if (-not (Test-Path $path)) {
     if ($part -eq 'frontend\dist\index.html') {
       throw "frontend\dist is missing. Build it first:  cd ..\frontend ; npm run build"
     }
     if ($part -eq 'backend\.env') {
-      throw "backend\.env is missing. The installer needs it to carry your keys."
+      throw "backend\.env is missing. The installer needs it to carry the Supabase mirror settings."
     }
     throw "Missing $part"
   }
 }
-
-$BackendFiles = @(
-  'main.py', 'webapp.py', 'config.py', 'db.py', 'service.py', 'scanner.py', 'sync.py',
-  'capture.py', 'notifier.py', 'staff_sync.py', 'zkfp.py', 'enroll.py', 'schema.sql', '.env.example'
-)
-
-Step 'Downloading the embeddable Python (cached in installer\vendor)'
-New-Item -ItemType Directory -Force -Path $Vendor | Out-Null
-if (-not (Test-Path $EmbedZip)) {
-  Invoke-WebRequest -Uri $EmbedUrl -OutFile $EmbedZip
+if (-not $SdkSource) {
+  throw 'ZKFinger SDK setup.exe not found. The folder "ZKFinger Standard SDK 5.3.0.33" must sit next to the installer folder.'
 }
 
-Step 'Unpacking the runtime'
+Step 'Making sure PyInstaller is available'
+& $PipPython -m PyInstaller --version *> $null
+if ($LASTEXITCODE -ne 0) {
+  & $PipPython -m pip install --quiet pyinstaller
+  if ($LASTEXITCODE -ne 0) { throw 'Could not install pyinstaller into the backend venv.' }
+}
+
+Step 'Building the one-file exe (backend\dist\SmartAttendance.exe)'
+Push-Location $Backend
+try {
+  & $PipPython -m PyInstaller --noconfirm --clean --noconsole --onefile --name SmartAttendance main.py
+  if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with code $LASTEXITCODE." }
+} finally { Pop-Location }
+
+Step 'Staging the app'
 if (Test-Path $Build) { Remove-Item $Build -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
-# Expand-Archive, not tar: Git's tar mishandles Windows paths in .bat scripts.
-$Unpacked = Join-Path $Vendor 'embed-unpacked'
-if (Test-Path $Unpacked) { Remove-Item $Unpacked -Recurse -Force }
-Expand-Archive -Path $EmbedZip -DestinationPath $Unpacked
-Copy-Item (Join-Path $Unpacked '*') $Runtime -Recurse
-Remove-Item $Unpacked -Recurse -Force
-
-Step 'Enabling site-packages and the app in the embeddable build'
-# A ._pth file puts Python in isolated mode: it ignores PYTHONPATH and the
-# script's own folder, and searches only the entries listed here. So both the
-# packages and the backend have to be named, relative to runtime\.
-$Pth = Get-ChildItem $Runtime -Filter "*._pth" | Select-Object -First 1
-$Lines = Get-Content $Pth.FullName | ForEach-Object {
-  if ($_ -match '^\s*#?\s*import site') { 'import site' } else { $_ }
-}
-@($Lines) + @('Lib\site-packages', '..\app\backend') | Set-Content $Pth.FullName -Encoding ascii
-
-Step 'Installing httpx and python-dotenv into the runtime'
-& $PipPython -m pip install --quiet --no-warn-script-location --target (Join-Path $Runtime 'Lib\site-packages') `
-  httpx==0.28.1 python-dotenv==1.2.1
-if ($LASTEXITCODE -ne 0) { throw "pip install failed with code $LASTEXITCODE" }
-
-Step 'Staging the backend'
-$StageBackend = Join-Path $App 'backend'
-New-Item -ItemType Directory -Force -Path $StageBackend | Out-Null
-foreach ($file in $BackendFiles) {
-  $source = Join-Path $Root "backend\$file"
-  if (Test-Path $source) { Copy-Item $source $StageBackend -Force }
-}
+New-Item -ItemType Directory -Force -Path $App | Out-Null
+New-Item -ItemType Directory -Force -Path $Vendor | Out-Null
+Copy-Item (Join-Path $Backend 'dist\SmartAttendance.exe') $App -Force
 
 Step 'Staging the web app'
+# The destination must exist first: Copy-Item of a wildcard onto a missing
+# directory flattens the tree and drops the assets\ folder, which leaves the
+# served index.html pointing at files that are not there.
 $StageWeb = Join-Path $App 'web'
 New-Item -ItemType Directory -Force -Path $StageWeb | Out-Null
 Copy-Item (Join-Path $Root 'frontend\dist\*') $StageWeb -Recurse -Force
+if (-not (Test-Path (Join-Path $StageWeb 'assets'))) {
+  throw 'Staged web folder is missing assets\; the copy flattened. Delete installer\build and rerun.'
+}
 
-Step 'Copying backend\.env into the package (contents not shown)'
-Copy-Item (Join-Path $Root 'backend\.env') (Join-Path $StageBackend '.env') -Force
-$EnvSize = (Get-Item (Join-Path $StageBackend '.env')).Length
+Step 'Staging schema.sql and the SDK driver'
+Copy-Item (Join-Path $Backend 'schema.sql') $App -Force
+Copy-Item (Join-Path $Backend '.env.example') $App -Force
+Copy-Item $SdkSource (Join-Path $Vendor 'ZKFingerSDK_setup.exe') -Force
+
+Step 'Copying backend\.env next to the exe (contents not shown)'
+Copy-Item (Join-Path $Backend '.env') (Join-Path $App '.env') -Force
+$EnvSize = (Get-Item (Join-Path $App '.env')).Length
 Write-Host "   .env carried over: $EnvSize bytes"
 
 Step 'Done'

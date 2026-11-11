@@ -1,11 +1,15 @@
-"""Turns a fingerprint hit into an attendance row plus a parent email."""
+"""Turns a fingerprint hit into an attendance row plus a queued parent email.
+
+The row lands in SQLite first (always), then rides along to Supabase as a
+best-effort copy so the web pages light up right away. The email itself is
+left PENDING in the row; worker.py sends it once the internet answers.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
-from db import SupabaseStore
 from notifier import Notifier
 
 # What a grade gets when it has no rule of its own. The Attendance page prefills
@@ -81,33 +85,47 @@ def _is_too_soon(previous_scan_iso: str | None, local_now: datetime, settings) -
     return local_now - previous < timedelta(minutes=settings.duplicate_scan_minutes)
 
 
-def handle_scan(store: SupabaseStore, notifier: Notifier, settings, fingerprint_id: int) -> ScanResult:
-    student = store.get_student(fingerprint_id)
+def handle_scan(local, cloud, notifier: Notifier, settings, fingerprint_id: int) -> ScanResult:
+    student = local.get_student(fingerprint_id)
     if student is None:
         print(f"[scan] ID {fingerprint_id} is not enrolled — add it on the Enrollment page.")
         return ScanResult(kind="unknown")
 
     now = datetime.now().astimezone()
-    previous = store.latest_scan_for_student(student["id"])
+    previous = local.latest_scan_for_student(student["id"])
     if _is_too_soon(previous.get("scan_time") if previous else None, now, settings):
         print(f"[scan] {student['first_name']} already scanned moments ago — ignoring repeat.")
         return ScanResult(kind="duplicate", student=student)
 
-    start, grace = late_rule(store, student.get("grade_level"))
+    start, grace = late_rule(local, student.get("grade_level"))
     status = _attendance_status(now, start, grace)
-    log = store.insert_attendance(
+    name = f"{student['first_name']} {student['last_name']}".strip()
+    log = local.insert_attendance(
         {
             "student_id": student["id"],
             "scan_time": now.isoformat(),
             "status": status,
-            "parent_notified": False,
+            "email_status": "PENDING" if student.get("parent_email") else "NO_EMAIL",
+            "parent_email": student.get("parent_email") or "",
+            "student_name": name,
+            "grade_level": student.get("grade_level") or "",
         }
     )
 
-    notified = notifier.notify_arrival(student, now, status)
-    if notified:
-        store.update_attendance(log["id"], {"parent_notified": True})
-        log["parent_notified"] = True
+    if cloud is not None:
+        try:
+            created = cloud.insert_attendance(
+                {
+                    "student_id": student["id"],
+                    "scan_time": now.isoformat(),
+                    "status": status,
+                    "parent_notified": False,
+                }
+            )
+            local.mark_log_synced(log["id"], created.get("id", ""))
+        except Exception as error:
+            print(f"[scan] Logged offline; the cloud copy will follow when the network returns: {error}")
 
-    print(f"[scan] {student['first_name']} {student['last_name']} -> {status} at {now:%H:%M}")
-    return ScanResult(kind="logged", student=student, log=log, status=status, notified=notified)
+    queued = "email queued" if log["email_status"] == "PENDING" else "no parent email on file"
+    print(f"[scan] {name} -> {status} at {now:%H:%M} ({queued})")
+    return ScanResult(kind="logged", student=student, log=log, status=status, notified=False)

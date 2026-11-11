@@ -20,23 +20,48 @@ import webapp
 import zkfp
 from capture import CaptureDriver
 from config import load_settings
-from db import build_store
+from database import SqliteStore
+from db import SupabaseStore
 from notifier import Notifier
 from scanner import SimulatedScanner, open_scanner
 from service import handle_scan
 from staff_sync import provision_pending
+from worker import OfflineWorker
 
 # Bumped with every backend change that the live rig must pick up; the tag
 # rides in the heartbeat so the web pill shows which build is actually running.
-BUILD = "2026-10-15a"
+BUILD = "2026-10-18a"
 
 
-def describe(settings, store, scanner, notifier) -> str:
-    database = (
-        f"Supabase ({settings.supabase_url})"
-        if store.name == "supabase"
-        else "local demo file (backend/demo_data.json)"
-    )
+class _LogFile:
+    """--noconsole silences print; this keeps the words in the data folder."""
+
+    def __init__(self, path) -> None:
+        self._fh = open(path, "a", encoding="utf-8", buffering=1)
+
+    def write(self, text: str) -> None:
+        if text:
+            self._fh.write(text)
+
+    def flush(self) -> None:
+        self._fh.flush()
+
+
+if getattr(sys, "frozen", False):
+    from database import default_db_path as _db_path
+
+    try:
+        _tee = _LogFile(_db_path().parent / "service.log")
+        sys.stdout = _tee
+        sys.stderr = _tee
+    except OSError:
+        pass
+
+
+def describe(settings, local, cloud, scanner, notifier) -> str:
+    database = f"SQLite ({local.path})"
+    if cloud is not None:
+        database += f" + Supabase mirror ({settings.supabase_url})"
     email = (
         notifier.provider
         if notifier.provider.startswith("console")
@@ -63,29 +88,33 @@ def _reset_if_new_day(state: dict) -> None:
         state["scans"] = 0
 
 
-def run_loop(scanner, store, notifier, settings) -> None:
+def run_loop(scanner, local, cloud, notifier, settings) -> None:
     state: dict = {"day": "", "scans": 0}
     last_beat = 0.0
     last_sync = 0.0
 
     def beat(message: str) -> None:
         _reset_if_new_day(state)
+        status = {
+            "connected": bool(getattr(scanner, "connected", False)),
+            "port": getattr(scanner, "label", "unknown"),
+            "last_heartbeat": datetime.now().astimezone().isoformat(),
+            "scans_today": state["scans"],
+            "message": message,
+        }
         try:
-            store.save_status(
-                {
-                    "connected": bool(getattr(scanner, "connected", False)),
-                    "port": getattr(scanner, "label", "unknown"),
-                    "last_heartbeat": datetime.now().astimezone().isoformat(),
-                    "scans_today": state["scans"],
-                    "message": message,
-                }
-            )
-        except Exception as error:  # a dead DB should not stop the kiosk
-            print(f"[status] Could not save heartbeat: {error}")
+            local.save_status(status)
+        except Exception as error:  # a broken DB file should not stop the kiosk
+            print(f"[status] Could not save the local heartbeat: {error}")
+        if cloud is not None:
+            try:
+                cloud.save_status(status)
+            except Exception:
+                pass  # offline: the web pill simply goes quiet until the worker reconnects
 
-    driver = CaptureDriver(store, scanner)
+    driver = CaptureDriver(cloud or local, scanner)
     beat(f"{BUILD} · Rebuilding the scanner's memory")
-    print(template_sync.report(template_sync.sync(store, scanner), scanner))
+    print(template_sync.report(template_sync.sync(local, scanner), scanner))
     last_sync = datetime.now().timestamp()
     beat(f"{BUILD} · Listening for scans")
 
@@ -102,12 +131,13 @@ def run_loop(scanner, store, notifier, settings) -> None:
                 )
             )
             if not driver.busy:
-                provision_pending(store)
+                if cloud is not None:
+                    provision_pending(cloud)
                 driver.maybe_prune()
 
         if not driver.busy and now - last_sync >= settings.resync_seconds:
             last_sync = now
-            summary = template_sync.sync(store, scanner)
+            summary = template_sync.sync(local, scanner)
             if summary["loaded"] or summary["removed"] or summary["errors"]:
                 print(template_sync.report(summary, scanner))
 
@@ -136,19 +166,31 @@ def run_loop(scanner, store, notifier, settings) -> None:
             print("[scan] Print not recognised — enrol it on the Students page first.")
             continue
 
-        result = handle_scan(store, notifier, settings, found.fid)
+        result = handle_scan(local, cloud, notifier, settings, found.fid)
         if result.kind == "logged":
             _reset_if_new_day(state)
             state["scans"] += 1
 
 
+def build_cloud(settings):
+    if settings.has_database:
+        return SupabaseStore(settings.supabase_url, settings.supabase_key)
+    return None
+
+
 def main(argv: list[str]) -> int:
     settings = load_settings()
-    store = build_store(settings)
+    local = SqliteStore()
+    cloud = build_cloud(settings)
     notifier = Notifier(settings)
 
     if "--status" in argv:
-        print(describe(settings, store, None, notifier))
+        print(describe(settings, local, cloud, None, notifier))
+        counts = local.queue_counts()
+        print(
+            f"queue   : {counts['email_pending']} email(s) pending, "
+            f"{counts['logs_to_sync']} scan(s) waiting for the cloud"
+        )
         return 0
 
     if "--once" in argv:
@@ -156,7 +198,7 @@ def main(argv: list[str]) -> int:
         if index >= len(argv) or not argv[index].isdigit():
             print("usage: python main.py --once <fingerprint_id>")
             return 2
-        handle_scan(store, notifier, settings, int(argv[index]))
+        handle_scan(local, cloud, notifier, settings, int(argv[index]))
         return 0
 
     if "--probe" in argv:
@@ -169,17 +211,23 @@ def main(argv: list[str]) -> int:
         webapp.start(settings, open_browser='--open' in argv)
 
     scanner = open_scanner(settings)
+    worker = OfflineWorker(settings, local, cloud, notifier)
+    worker.start()
     try:
         if "--clear" in argv:
-            return _clear(argv, scanner, store)
+            return _clear(argv, scanner, local)
 
         print("Smart Attendance backend")
         print(f"build {BUILD}")
-        print(describe(settings, store, scanner, notifier))
-        run_loop(scanner, store, notifier, settings)
+        print(describe(settings, local, cloud, scanner, notifier))
+        print(f"emailer: checking the queue every {settings.emailer_seconds}s")
+        run_loop(scanner, local, cloud, notifier, settings)
     finally:
+        worker.stop()
         scanner.stop()
-        store.close()
+        local.close()
+        if cloud is not None:
+            cloud.close()
     return 0
 
 

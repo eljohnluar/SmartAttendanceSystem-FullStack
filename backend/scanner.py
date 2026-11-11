@@ -221,6 +221,9 @@ class SimulatedScanner(Scanner):
         )
 
     def _pump_stdin(self) -> None:
+        if sys.stdin is None:  # windowed exe: there is no keyboard stream at all
+            self._events.put(None)
+            return
         for line in sys.stdin:
             self._events.put(line.strip())
         self._events.put(None)
@@ -294,18 +297,28 @@ class SimulatedScanner(Scanner):
 
 
 def open_scanner(settings) -> Scanner:
-    """The USB device when it answers, the keyboard simulator when it does not."""
+    """The USB device when it answers, the keyboard simulator when it does not.
+
+    A frozen (console-less) exe has no usable stdin, and PyInstaller only
+    nulls it mid-startup, so the simulator is refused there outright: the
+    LiveScanner keeps retrying the cable instead of quitting on a fake QUIT.
+    """
+    frozen = bool(getattr(sys, "frozen", False))
     if settings.simulate_scanner:
         return SimulatedScanner()
+    can_fallback = settings.allow_simulator_fallback and not frozen
     scanner = LiveScanner(settings.scanner_index, settings.match_threshold)
     try:
         scanner.start()
     except zkfp.ScannerError as error:
-        if not settings.allow_simulator_fallback:
+        if not can_fallback:
             raise
         print(f"[scanner] {error}\n[scanner] Falling back to the keyboard simulator.")
         return SimulatedScanner()
-    if not scanner.connected and settings.allow_simulator_fallback:
+    if not scanner.connected and can_fallback:
+        if sys.stdin is None:
+            print(f"[scanner] {scanner.message}\n[scanner] No console for the simulator; will keep retrying the scanner.")
+            return scanner
         print(f"[scanner] {scanner.message}\n[scanner] Falling back to the keyboard simulator.")
         scanner.stop()
         return SimulatedScanner()

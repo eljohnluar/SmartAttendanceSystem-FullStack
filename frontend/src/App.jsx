@@ -102,9 +102,7 @@ function Shell() {
         </div>
       )
     }
-    // A session that has not proved its code sees no data at all, so the kiosk
-    // would only show an empty screen. Send them to the code step instead.
-    if (current === 'kiosk' && access !== 'unverified') {
+    if (current === 'kiosk') {
       return (
         <div className="kiosk-bare">
           <Kiosk />

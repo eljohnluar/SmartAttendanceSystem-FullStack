@@ -15,7 +15,8 @@ from datetime import datetime
 
 from capture import SCANS
 from config import load_settings
-from db import build_store
+from database import SqliteStore
+from db import SupabaseStore
 from scanner import SimulatedScanner, open_scanner
 from sync import encode, remember
 
@@ -73,7 +74,10 @@ def _capture(scanner, timeout_seconds: int = 90) -> list[bytes] | None:
 
 def main() -> int:
     settings = load_settings()
-    store = build_store(settings)
+    local = SqliteStore()
+    # The web pages own the roster, so prefer Supabase when it is configured;
+    # the same row is always mirrored to SQLite so this machine can scan offline.
+    store = SupabaseStore(settings.supabase_url, settings.supabase_key) if settings.has_database else local
 
     # Questions first: the simulator pumps stdin, so prompting while it runs
     # would race for the same keystrokes.
@@ -103,16 +107,20 @@ def main() -> int:
         scanner.add(student["fingerprint_id"], enrolled)
         remember(student["fingerprint_id"], blob)
         student["fingerprint_template"] = blob
-        store.insert_student(student)
+        saved = store.insert_student(student)
+        if store is not local:
+            local.upsert_students([saved])
 
         print(
             f"\n[enroll] Saved {student['first_name']} {student['last_name']} "
-            f"as fingerprint ID {student['fingerprint_id']} ({store.name} store) at {datetime.now():%H:%M}."
+            f"as fingerprint ID {student['fingerprint_id']} ({store.name} + SQLite) at {datetime.now():%H:%M}."
         )
         return 0
     finally:
         scanner.stop()
-        store.close()
+        if store is not local:
+            store.close()
+        local.close()
 
 
 if __name__ == "__main__":

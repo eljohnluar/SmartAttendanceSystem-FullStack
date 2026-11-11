@@ -74,14 +74,7 @@ export async function registerOrSignIn(email, password, fullName) {
 /**
  * Verifies the staff user's password for sensitive action confirmations
  * (e.g. saving students or saving system/grade configurations).
- *
- * Checked on an isolated client that never persists a session, so the current
- * sign-in — including its emailed-code proof — is left untouched. Signing in
- * on the main client here used to swap the verified session for a
- * password-only one and bounce the user back to the code step.
  */
-let passwordChecker = null
-
 export async function verifyPassword(email, password) {
   const trimmed = password?.trim()
   if (!trimmed) {
@@ -90,10 +83,7 @@ export async function verifyPassword(email, password) {
   if (!isLive || !email) {
     return true
   }
-  passwordChecker ??= createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  })
-  const { error } = await passwordChecker.auth.signInWithPassword({
+  const { error } = await supabase.auth.signInWithPassword({
     email,
     password: trimmed,
   })

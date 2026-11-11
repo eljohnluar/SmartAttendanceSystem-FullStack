@@ -273,16 +273,6 @@ function createStore() {
         checked_in: new Set(today.map((log) => log.student_id)).size,
       }
     },
-    async getStatus() {
-      return {
-        id: 1,
-        connected: false,
-        port: null,
-        last_heartbeat: null,
-        scans_today: state.logs.filter((log) => isToday(log.scan_time)).length,
-        message: 'Demo mode — Python backend not running',
-      }
-    },
     async getGradeSettings(grade) {
       return state.grade_settings.find((row) => row.grade_level === grade) ?? null
     },

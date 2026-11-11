@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Avatar, StatusPill } from './ui.jsx'
+import { Avatar } from './ui.jsx'
 import { useApp } from '../lib/useApp.js'
 
 export function TopBar() {
-  const { mode, user, staff, backend, signOut } = useApp()
+  const { user, staff, signOut } = useApp()
   const [open, setOpen] = useState(false)
 
   const name = staff?.full_name || user?.email || 'Staff'
@@ -16,9 +16,6 @@ export function TopBar() {
       </span>
 
       <div className="topbar-actions">
-        {mode === 'demo' && <span className="mode-tag">demo data</span>}
-        <StatusPill backend={backend} />
-
         <div className="profile">
           <button
             type="button"

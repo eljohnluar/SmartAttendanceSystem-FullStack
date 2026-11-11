@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
-import { verifyPassword } from '../lib/auth.js'
 import { studentFor } from '../lib/format.js'
 import { useApp } from '../lib/useApp.js'
 
@@ -16,11 +15,10 @@ function cutoffOf(start, minutes) {
 
 /**
  * Class attendance configuration (start time and late grace minutes).
- * When "Save configuration" is clicked, the configuration form disappears
- * and the password input appears to authorize the changes.
+ * "Save configuration" validates the inputs and stores them for the grade.
  */
 export function LateRule({ students = [], logs = [] }) {
-  const { user, staff, refresh } = useApp()
+  const { refresh } = useApp()
   const grades = useMemo(
     () => [...new Set(students.map((student) => student.grade_level).filter(Boolean))].sort(),
     [students],
@@ -36,11 +34,6 @@ export function LateRule({ students = [], logs = [] }) {
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
 
-  // Password confirmation step state: 'form' | 'password'
-  const [step, setStep] = useState('form')
-  const [password, setPassword] = useState('')
-  const [passwordError, setPasswordError] = useState('')
-
   useEffect(() => {
     if (!grade) return undefined
     let stale = false
@@ -53,7 +46,6 @@ export function LateRule({ students = [], logs = [] }) {
         setSaved(row ?? null)
         setNote('')
         setError('')
-        setStep('form')
       })
       .catch((loadError) => {
         if (!stale) setError(loadError.message)
@@ -68,7 +60,7 @@ export function LateRule({ students = [], logs = [] }) {
     [logs, students, grade],
   )
 
-  function handleSaveClick(event) {
+  async function handleSaveClick(event) {
     event.preventDefault()
     const minutes = Number(grace)
     if (!/^\d{2}:\d{2}$/.test(start)) {
@@ -80,40 +72,15 @@ export function LateRule({ students = [], logs = [] }) {
       return
     }
 
-    // Input is valid: transition from configuration form to password confirmation
+    setBusy(true)
     setError('')
     setNote('')
-    setPassword('')
-    setPasswordError('')
-    setStep('password')
-  }
-
-  async function handlePasswordConfirm(event) {
-    event.preventDefault()
-    setPasswordError('')
-
-    const trimmedPassword = password.trim()
-    if (!trimmedPassword) {
-      setPasswordError('Please enter your password to save configuration.')
-      return
-    }
-
-    const minutes = Number(grace)
-    setBusy(true)
-
     try {
-      // Security check: verify password
-      const userEmail = user?.email || staff?.email
-      await verifyPassword(userEmail, trimmedPassword)
-
-      // Save configuration to database
       await api.saveGradeSettings(grade, { school_start: start, late_grace_minutes: minutes })
       setSaved({ school_start: start, late_grace_minutes: minutes })
       setNote(`Configuration saved. ${grade} is late from ${cutoffOf(start, minutes)} onwards.`)
-      setStep('form')
-      setPassword('')
     } catch (saveError) {
-      setPasswordError(saveError.message)
+      setError(saveError.message)
     } finally {
       setBusy(false)
     }
@@ -141,70 +108,6 @@ export function LateRule({ students = [], logs = [] }) {
 
   if (grades.length === 0) return null
 
-  // ── Step 2: Password confirmation view ──────────────────────────────────
-  if (step === 'password') {
-    return (
-      <section className="card rule-card">
-        <h2>Confirm save configuration</h2>
-
-        <form className="password-confirm" onSubmit={handlePasswordConfirm} noValidate>
-          <div className="password-confirm-head">
-            <span className="password-confirm-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </span>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Save Configuration for {grade}</h3>
-              <p className="hint" style={{ marginTop: '2px' }}>
-                School starts: <strong>{start}</strong> · Late grace: <strong>{grace} minutes</strong> (Late cutoff: {cutoffOf(start, Number(grace))})
-              </p>
-            </div>
-          </div>
-
-          <div className="field">
-            <label htmlFor="config_password">Enter your password to save configuration</label>
-            <input
-              id="config_password"
-              type="password"
-              placeholder="Enter password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value)
-                setPasswordError('')
-              }}
-              autoFocus
-              autoComplete="current-password"
-            />
-            <span className="hint">Password authorization is required to update attendance configuration.</span>
-          </div>
-
-          {passwordError && <p className="alert alert-error">{passwordError}</p>}
-
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={busy || !password.trim()}>
-              {busy ? 'Saving configuration…' : 'Confirm & Save'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-quiet"
-              disabled={busy}
-              onClick={() => {
-                setStep('form')
-                setPassword('')
-                setPasswordError('')
-              }}
-            >
-              Back to edit
-            </button>
-          </div>
-        </form>
-      </section>
-    )
-  }
-
-  // ── Step 1: Configuration form view ─────────────────────────────────────
   return (
     <section className="card rule-card">
       <h2>Late rule configuration</h2>

@@ -9,15 +9,6 @@ export function Avatar({ student, size = 'md' }) {
   )
 }
 
-export function StatusPill({ backend }) {
-  return (
-    <span className={`pill pill-${backend.state}`}>
-      <span className="pill-dot" />
-      {backend.label}
-    </span>
-  )
-}
-
 export function Notice({ title, children }) {
   return (
     <section className="login">

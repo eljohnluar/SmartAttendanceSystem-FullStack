@@ -3,10 +3,8 @@
 #   cd C:\Projects\smartattendancesystem\installer
 #   powershell -ExecutionPolicy Bypass -File .\build.ps1
 #
-# It stages the runtime and the app (prepare.ps1), then compiles the setup with
-# Inno Setup. You are asked for a password twice; that is the password whoever
-# installs this has to type, and it is what keeps the .env inside the setup
-# unreadable to anyone else.
+# It stages the exe, the web app and the SDK driver (prepare.ps1), then compiles
+# the setup with Inno Setup. The setup asks for no password.
 
 param(
   [switch]$SkipPrepare,
@@ -14,31 +12,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-
-function Unprotect($secure) {
-  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  try { [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-  }
-}
-
-if (-not $env:SETUP_PASSWORD) {
-  Write-Host 'Choose the password for this installer. It is required on every device you install it on.' -ForegroundColor Yellow
-  $first = Read-Host 'Installer password' -AsSecureString
-  $second = Read-Host 'Repeat it' -AsSecureString
-  if ((Unprotect $first) -ne (Unprotect $second)) { throw 'The two passwords did not match.' }
-  if ((Unprotect $first).Length -lt 8) { throw 'Use at least 8 characters.' }
-  $env:SETUP_PASSWORD = Unprotect $first
-
-  # Saved so the Inno Setup Compiler window can build on its own afterwards.
-  # password.ini is git-ignored; delete it when you are done if you prefer.
-  @(
-    '; written by build.ps1 - the Inno Setup Compiler window reads this',
-    '',
-    '[setup]',
-    "password=$($env:SETUP_PASSWORD)"
-  ) | Set-Content (Join-Path $PSScriptRoot 'password.ini') -Encoding ascii
-}
 
 if (-not $SkipPrepare) {
   & (Join-Path $PSScriptRoot 'prepare.ps1')
