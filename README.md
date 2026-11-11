@@ -14,19 +14,18 @@ Student finger ─► Live20R (USB) ─► Python backend ─► Supabase ─►
 
 ## Key features
 
-- **Works with the internet unplugged.** Every scan is written to a local
-  SQLite database first (`C:\Users\Public\SmartAttendance\attendance.db`), so
-  the gate never stops recording. When the network returns, a background thread
-  mirrors the scans to Supabase, pulls the roster back down and releases the
-  queued parent emails — all within 30 seconds, no restart.
+- **One cloud database, live everywhere.** Students, attendance, staff, late
+  rules and the audit trail live in a Supabase (Postgres) project;
+  `backend/schema.sql` sets up the tables, security policies and realtime
+  publication in a single run, and every screen updates the moment a scan lands.
+- **Never misses an arrival.** The machine with the scanner queues scans and
+  parent notices locally if the internet drops, and syncs them all back the
+  moment it returns — no restart, no lost record.
 - **Automatic parent notices.** Each arrival emails the parent ("arrived at
-  school" / "arrived late") through Brevo, straight from the queue with
-  `PENDING → SENT` status tracked per scan.
-- **Fingerprint matching in software.** The Live20R needs no memory of its own;
-  every print lives on the student's row and is rebuilt into the scanner at
-  startup, so a re-plugged or swapped device recovers by itself.
-- **Live entrance kiosk.** The scan screen updates on its own the moment a
-  student is recognised, with a running count of arrivals.
+  school" / "arrived late") through Brevo, with delivery tracked per scan.
+- **Fingerprint matching in software.** The Live20R needs no memory of its
+  own; every print is stored against the student and rebuilt into the scanner
+  at startup, so a re-plugged or swapped device recovers by itself.
 - **Two roles, enforced in the database.** Admins see the whole school;
   teachers see only their grades and sections — row-level security, not just
   hidden menus. Plain email-and-password sign-in.
@@ -34,10 +33,9 @@ Student finger ─► Live20R (USB) ─► Python backend ─► Supabase ─►
   minutes on the Attendance page; the next scan uses the new rule, no restart.
 - **Reports and paper records.** Dashboards, arrivals by day, per-grade
   breakdowns, parent-notification status, and print-ready tables.
-- **One-file installer.** `installer\build.ps1` produces a single Setup.exe
-  that carries the packaged backend (no Python needed on the target machine),
-  the built web app, the ZKFinger SDK driver and an optional start-at-sign-in
-  shortcut. See `installer\README.md`.
+- **One-file installer.** A single Setup.exe carries the packaged backend
+  (no Python needed on the target machine), the built web app, the ZKFinger
+  SDK driver and an optional start-at-sign-in shortcut. See `installer\README.md`.
 
 | Folder | What lives there |
 | --- | --- |
